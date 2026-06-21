@@ -1,0 +1,230 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Databases & Storage
+  # ============================================================================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: politica-postgres
+    environment:
+      POSTGRES_DB: politica
+      POSTGRES_USER: politica
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-politica_dev_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U politica"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: politica-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: politica-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: politica-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: politica-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================================
+  # Browser Automation - Headless (Production Scraping)
+  # ============================================================================
+  
+  collector-headless:
+    build:
+      context: ./services/collector
+      dockerfile: Dockerfile
+    container_name: politica-collector-headless
+    environment:
+      NODE_ENV: development
+      BROWSER_MODE: headless
+      STEALTH_MODE: "true"
+      REDIS_URL: redis://redis:6379
+      POSTGRES_URL: postgresql://politica:${POSTGRES_PASSWORD:-politica_dev_pass}@postgres:5432/politica
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 1  # Can scale to 3+ in production
+
+  # ============================================================================
+  # Browser Automation - Headed (Admin Viewing with VNC)
+  # ============================================================================
+  
+  collector-headed:
+    image: selenium/standalone-chrome:latest
+    container_name: politica-collector-headed
+    environment:
+      SE_VNC_NO_PASSWORD: "1"
+      SE_SCREEN_WIDTH: "1920"
+      SE_SCREEN_HEIGHT: "1080"
+      SE_NODE_MAX_SESSIONS: "1"
+    ports:
+      - "4444:4444"  # Selenium WebDriver
+      - "5900:5900"  # VNC server
+      - "7900:7900"  # noVNC web interface
+    volumes:
+      - /dev/shm:/dev/shm
+      - ./services/collector:/workspace
+    shm_size: 2gb
+
+  # ============================================================================
+  # Backend Services
+  # ============================================================================
+  
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: politica-api
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql://politica:${POSTGRES_PASSWORD:-politica_dev_pass}@postgres:5432/politica
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      QDRANT_URL: http://qdrant:6333
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - ./services/api:/app
+      - ./shared:/shared
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  processor:
+    build:
+      context: ./services/processor
+      dockerfile: Dockerfile
+    container_name: politica-processor
+    environment:
+      DATABASE_URL: postgresql://politica:${POSTGRES_PASSWORD:-politica_dev_pass}@postgres:5432/politica
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./services/processor:/app
+      - ./shared:/shared
+      - model_cache:/models
+
+  agents:
+    build:
+      context: ./services/agents
+      dockerfile: Dockerfile
+    container_name: politica-agents
+    environment:
+      DATABASE_URL: postgresql://politica:${POSTGRES_PASSWORD:-politica_dev_pass}@postgres:5432/politica
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./services/agents:/app
+      - ./shared:/shared
+      - model_cache:/models
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  qdrant_data:
+  elasticsearch_data:
+  model_cache:
+
+networks:
+  default:
+    name: politica-network
