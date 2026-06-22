@@ -46,21 +46,20 @@ export class HeadlessBrowserPool {
       locale: 'en-US'
     })
 
-    // Add stealth scripts
-    await context.addInitScript(() => {
-      // Override webdriver detection
-      Object.defineProperty(navigator, 'webdriver', { get: () => false })
+    // Add stealth scripts - runs in browser context
+    await context.addInitScript(`
+      Object.defineProperty(navigator, 'webdriver', { 
+        get: () => false 
+      });
       
-      // Override plugins
       Object.defineProperty(navigator, 'plugins', {
         get: () => [1, 2, 3, 4, 5]
-      })
+      });
       
-      // Override languages
       Object.defineProperty(navigator, 'languages', {
         get: () => ['en-US', 'en']
-      })
-    })
+      });
+    `)
 
     return context
   }

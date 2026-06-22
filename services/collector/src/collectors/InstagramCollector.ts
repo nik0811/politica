@@ -104,7 +104,7 @@ export class InstagramCollector {
     try {
       // Scroll down in small increments
       for (let i = 0; i < 3; i++) {
-        await page.evaluate(() => window.scrollBy(0, 500))
+        await page.evaluate('window.scrollBy(0, 500)')
         await page.waitForTimeout(1000)
       }
     } catch (error) {
