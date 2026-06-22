@@ -1,0 +1,267 @@
+---
+alwaysApply: true
+---
+# Politica Code Quality & Testing Standards
+
+## Core Principles
+
+1. **Minimal Code for Fixes** - When fixing issues, use the smallest, most targeted change possible
+2. **End-to-End Testing Required** - NO feature is "complete" until tested from frontend to backend
+3. **No Duplicate Code** - DRY (Don't Repeat Yourself) - refactor common patterns into reusable functions
+4. **Simple Syntax** - Clear, readable code over clever tricks
+
+---
+
+## Issue Resolution Guidelines
+
+### When Fixing Bugs or Issues
+
+✅ **DO:**
+- Identify the root cause first
+- Fix only what's broken
+- Add minimal code to solve the specific issue
+- Add a test case to prevent regression
+- Document why the fix works
+
+❌ **DON'T:**
+- Refactor unrelated code
+- Add "defensive" code without clear need
+- Change patterns that are working
+- Add extra features while fixing
+
+### Example: Minimal Fix
+
+```python
+# ❌ BAD: Over-engineered fix
+def get_document(doc_id: str):
+    try:
+        with error_handler():
+            with performance_monitor():
+                with retry_logic(max_attempts=3):
+                    doc = db.query(Document).filter_by(id=doc_id).first()
+                    if not doc:
+                        raise NotFoundError()
+                    return doc
+    except Exception as e:
+        logger.log_everything(e)
+        send_alert(e)
+        raise
+
+# ✅ GOOD: Targeted fix
+def get_document(doc_id: str):
+    doc = db.query(Document).filter_by(id=doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+```
+
+---
+
+## Feature Completion Checklist
+
+A feature is ONLY complete when ALL of these are done:
+
+- [ ] Backend implementation complete
+- [ ] Frontend implementation complete
+- [ ] Backend unit tests pass
+- [ ] API integration tests pass
+- [ ] Frontend component tests pass
+- [ ] **End-to-end test passes** (user clicks button → API call → database → response → UI update)
+- [ ] Manual testing in browser confirms expected behavior
+- [ ] Code reviewed for duplicates and clutter
+- [ ] Documentation updated
+
+### E2E Test Example
+
+```typescript
+// ✅ GOOD: Proper E2E test
+test('User can create and view a document', async () => {
+  // Frontend action
+  await page.goto('http://localhost:3000/admin/documents')
+  await page.click('button:has-text("New Document")')
+  await page.fill('input[name="title"]', 'Test Doc')
+  await page.fill('textarea[name="content"]', 'Test content')
+  await page.click('button:has-text("Save")')
+  
+  // Wait for API call and DB save
+  await page.waitForSelector('text=Document created successfully')
+  
+  // Verify in UI
+  await page.goto('http://localhost:3000/admin/documents')
+  await expect(page.locator('text=Test Doc')).toBeVisible()
+  
+  // Verify in backend
+  const response = await fetch('http://localhost:8000/api/documents')
+  const docs = await response.json()
+  expect(docs.find(d => d.title === 'Test Doc')).toBeDefined()
+})
+```
+
+---
+
+## Code Duplication Prevention
+
+### Identify Duplication
+
+❌ **BAD: Repeated code**
+```python
+# In documents.py
+@router.get("/")
+async def get_documents(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    if limit > 100:
+        raise HTTPException(status_code=400, detail="Limit too high")
+    documents = db.query(Document).offset(skip).limit(limit).all()
+    return documents
+
+# In promises.py
+@router.get("/")
+async def get_promises(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    if limit > 100:
+        raise HTTPException(status_code=400, detail="Limit too high")
+    promises = db.query(Promise).offset(skip).limit(limit).all()
+    return promises
+```
+
+✅ **GOOD: Extracted common logic**
+```python
+# In utils/pagination.py
+def validate_pagination(limit: int, max_limit: int = 100):
+    if limit > max_limit:
+        raise HTTPException(status_code=400, detail=f"Limit cannot exceed {max_limit}")
+
+def paginate(query, skip: int, limit: int):
+    validate_pagination(limit)
+    return query.offset(skip).limit(limit).all()
+
+# In documents.py
+@router.get("/")
+async def get_documents(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    return paginate(db.query(Document), skip, limit)
+
+# In promises.py
+@router.get("/")
+async def get_promises(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    return paginate(db.query(Promise), skip, limit)
+```
+
+---
+
+## Simple Syntax Standards
+
+### Clarity Over Cleverness
+
+❌ **BAD: Too clever**
+```python
+result = [x for x in (y if y > 0 else 0 for y in (z*2 for z in data)) if x % 2 == 0]
+```
+
+✅ **GOOD: Clear and readable**
+```python
+doubled_values = [z * 2 for z in data]
+positive_values = [max(0, y) for y in doubled_values]
+even_values = [x for x in positive_values if x % 2 == 0]
+```
+
+### Naming Conventions
+
+✅ **GOOD: Descriptive names**
+```python
+def get_documents_by_sentiment_range(min_sentiment: float, max_sentiment: float):
+    return db.query(Document).filter(
+        Document.sentiment >= min_sentiment,
+        Document.sentiment <= max_sentiment
+    ).all()
+```
+
+❌ **BAD: Unclear names**
+```python
+def get_docs(min: float, max: float):
+    return db.query(Document).filter(Document.sentiment >= min, Document.sentiment <= max).all()
+```
+
+---
+
+## File Organization
+
+### Keep Files Small and Focused
+
+✅ **GOOD:**
+```
+routers/
+├── documents.py          # ~100 lines
+├── topics.py            # ~80 lines
+└── promises.py          # ~90 lines
+```
+
+❌ **BAD:**
+```
+routers/
+└── all_routes.py        # 1500 lines
+```
+
+### One Responsibility Per File
+
+✅ **GOOD:**
+```
+services/
+├── database.py          # DB connection only
+├── storage.py           # File storage only
+└── cache.py             # Caching only
+```
+
+❌ **BAD:**
+```
+services/
+└── utils.py             # Everything mixed together
+```
+
+---
+
+## Error Handling
+
+### Be Specific
+
+✅ **GOOD:**
+```python
+try:
+    document = get_document(doc_id)
+except DocumentNotFoundError:
+    return {"error": "Document not found", "doc_id": doc_id}
+except DatabaseConnectionError:
+    logger.error(f"DB connection failed while fetching {doc_id}")
+    return {"error": "Service temporarily unavailable"}
+```
+
+❌ **BAD:**
+```python
+try:
+    document = get_document(doc_id)
+except Exception as e:
+    return {"error": "Something went wrong"}
+```
+
+---
+
+## Pre-Commit Checklist
+
+Before marking ANY feature complete:
+
+1. ✅ Run all tests: `pytest` (backend) and `npm test` (frontend)
+2. ✅ Test manually in browser
+3. ✅ Check for code duplication: `grep -r "duplicate_pattern" .`
+4. ✅ Verify E2E flow works
+5. ✅ Code is simple and readable
+6. ✅ No debug code (console.log, print statements)
+7. ✅ Documentation updated
+
+---
+
+## Quick Reference
+
+| Issue Type | Solution Approach |
+|------------|------------------|
+| Bug fix | Minimal targeted change + test |
+| New feature | Backend → Frontend → E2E test |
+| Refactor | Extract common patterns only |
+| Performance | Profile first, optimize specific bottleneck |
+| Code smell | Simplify, don't add complexity |

@@ -1,0 +1,151 @@
+---
+description: React/Next.js frontend standards for admin portal
+globs: politica-admin-portal/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# React/Next.js Frontend Standards
+
+## Component Patterns
+
+### Server vs Client Components
+
+```typescript
+// ✅ GOOD: Server component (default)
+// app/admin/documents/page.tsx
+export default async function DocumentsPage() {
+  const documents = await fetchDocuments()  // Server-side fetch
+  return <DocumentList documents={documents} />
+}
+
+// ✅ GOOD: Client component when needed
+// components/DocumentList.tsx
+"use client"
+
+import { useState } from 'react'
+
+export function DocumentList({ documents }) {
+  const [selected, setSelected] = useState(null)
+  // Interactive features need client component
+}
+```
+
+### Data Fetching
+
+```typescript
+// ✅ GOOD: Type-safe API calls
+async function fetchDocuments(): Promise<Document[]> {
+  const response = await fetch('http://localhost:8000/api/documents', {
+    next: { revalidate: 60 }  // Cache for 60 seconds
+  })
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch documents: ${response.statusText}`)
+  }
+  
+  return response.json()
+}
+
+// ❌ BAD: No types, no error handling
+async function fetchDocuments() {
+  const response = await fetch('http://localhost:8000/api/documents')
+  return response.json()
+}
+```
+
+## State Management
+
+```typescript
+// ✅ GOOD: Local state for UI
+function DocumentCard({ document }: { document: Document }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  
+  return (
+    <div>
+      <h3>{document.title}</h3>
+      {isExpanded && <p>{document.content}</p>}
+      <button onClick={() => setIsExpanded(!isExpanded)}>
+        {isExpanded ? 'Collapse' : 'Expand'}
+      </button>
+    </div>
+  )
+}
+
+// ❌ BAD: Over-engineered state
+import { useContext } from 'react'
+import { DocumentExpandContext } from '@/contexts/DocumentExpandContext'
+
+function DocumentCard({ document }: { document: Document }) {
+  const { expandedDocs, toggleExpand } = useContext(DocumentExpandContext)
+  // Too complex for simple UI state
+}
+```
+
+## API Integration
+
+```typescript
+// ✅ GOOD: Centralized API client
+// lib/api-client.ts
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
+
+export async function apiGet<T>(endpoint: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${endpoint}`)
+  if (!response.ok) {
+    throw new Error(`API error: ${response.statusText}`)
+  }
+  return response.json()
+}
+
+export const api = {
+  documents: {
+    list: () => apiGet<Document[]>('/documents'),
+    get: (id: string) => apiGet<Document>(`/documents/${id}`),
+  },
+  topics: {
+    list: () => apiGet<Topic[]>('/topics'),
+  },
+}
+
+// Usage in components
+const documents = await api.documents.list()
+```
+
+## Error Boundaries
+
+```typescript
+// ✅ GOOD: Error boundary for data fetching
+// app/admin/documents/error.tsx
+'use client'
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error
+  reset: () => void
+}) {
+  return (
+    <div>
+      <h2>Failed to load documents</h2>
+      <p>{error.message}</p>
+      <button onClick={reset}>Try again</button>
+    </div>
+  )
+}
+```
+
+## Loading States
+
+```typescript
+// ✅ GOOD: Loading UI
+// app/admin/documents/loading.tsx
+export default function Loading() {
+  return (
+    <div className="space-y-4">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="skeleton h-20 w-full" />
+      ))}
+    </div>
+  )
+}
+```

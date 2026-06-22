@@ -1,0 +1,142 @@
+---
+description: TypeScript/Node.js coding standards for browser collector
+globs: services/collector/**/*.ts
+alwaysApply: false
+---
+
+# TypeScript/Node.js Standards
+
+## Browser Automation Patterns
+
+### Playwright Best Practices
+
+```typescript
+// ✅ GOOD: Proper waits and error handling
+async function scrapeInstagramPost(page: Page, url: string) {
+  await page.goto(url, { waitUntil: 'networkidle' })
+  
+  // Wait for specific element
+  await page.waitForSelector('[data-testid="post-content"]', { timeout: 10000 })
+  
+  // Extract data
+  const content = await page.locator('[data-testid="post-content"]').textContent()
+  
+  if (!content) {
+    throw new Error('Failed to extract post content')
+  }
+  
+  return { content }
+}
+
+// ❌ BAD: No waits, no error handling
+async function scrapeInstagramPost(page: Page, url: string) {
+  await page.goto(url)
+  const content = await page.locator('[data-testid="post-content"]').textContent()
+  return { content }
+}
+```
+
+### Type Safety
+
+```typescript
+// ✅ GOOD: Explicit types
+interface ScrapedPost {
+  id: string
+  content: string
+  author: string
+  timestamp: Date
+  images: string[]
+}
+
+async function scrapePost(url: string): Promise<ScrapedPost> {
+  // Implementation
+}
+
+// ❌ BAD: Any types
+async function scrapePost(url: string): Promise<any> {
+  // Implementation
+}
+```
+
+### Error Handling
+
+```typescript
+// ✅ GOOD: Specific error handling
+try {
+  const post = await scrapeInstagramPost(page, url)
+  await savePost(post)
+} catch (error) {
+  if (error instanceof TimeoutError) {
+    logger.warn(`Timeout scraping ${url}, will retry`)
+    return { status: 'retry', url }
+  } else if (error instanceof BotDetectionError) {
+    logger.error(`Bot detected on ${url}, switching to headed mode`)
+    return { status: 'switch_mode', url }
+  }
+  throw error
+}
+
+// ❌ BAD: Generic catch
+try {
+  const post = await scrapeInstagramPost(page, url)
+  await savePost(post)
+} catch (e) {
+  console.log('Error:', e)
+}
+```
+
+## Async Patterns
+
+```typescript
+// ✅ GOOD: Proper promise handling
+async function processMultiplePages(urls: string[]) {
+  const results = await Promise.allSettled(
+    urls.map(url => scrapePage(url))
+  )
+  
+  const successful = results
+    .filter(r => r.status === 'fulfilled')
+    .map(r => r.value)
+  
+  const failed = results
+    .filter(r => r.status === 'rejected')
+    .map((r, i) => ({ url: urls[i], error: r.reason }))
+  
+  return { successful, failed }
+}
+
+// ❌ BAD: Unhandled promises
+async function processMultiplePages(urls: string[]) {
+  return urls.map(url => scrapePage(url))  // Returns promises, not results!
+}
+```
+
+## Class Structure
+
+```typescript
+// ✅ GOOD: Focused, single-responsibility classes
+class InstagramCollector {
+  private page: Page
+  private logger: Logger
+  
+  constructor(page: Page, logger: Logger) {
+    this.page = page
+    this.logger = logger
+  }
+  
+  async collectPost(url: string): Promise<Post> {
+    // Single responsibility: collect posts
+  }
+  
+  private async extractContent(): Promise<string> {
+    // Helper method
+  }
+}
+
+// ❌ BAD: God class doing everything
+class Collector {
+  async scrapeEverything() {
+    // Instagram, Twitter, Telegram, all in one method
+  }
+}
+```
