@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     
     # Database
-    DATABASE_URL: str = "postgresql://politica:politica_dev_pass@postgres:5432/politica"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/politica"
     
     # Redis
     REDIS_URL: str = "redis://redis:6379"
@@ -33,5 +33,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Allow extra env vars
 
 settings = Settings()
