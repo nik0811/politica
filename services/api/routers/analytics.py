@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text
 from datetime import datetime, timedelta
+from typing import Optional
 from database import get_db
 from models.models import Document as DocumentModel, Promise as PromiseModel, PostComment
 from services.search import retrieve_context_for_query
@@ -21,29 +22,64 @@ def _sentiment_label(score: float) -> str:
     return "neutral"
 
 
-def _bucket_sentiments(db: Session):
+def _bucket_sentiments(db: Session, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None):
     """Count documents in each sentiment bucket using AI-set Document.sentiment (-1.0 to 1.0)."""
-    positive = db.query(func.count()).filter(
+    base_query = db.query(func.count()).filter(DocumentModel.sentiment.isnot(None))
+    
+    if start_date:
+        base_query = base_query.filter(DocumentModel.collected_at >= start_date)
+    if end_date:
+        base_query = base_query.filter(DocumentModel.collected_at <= end_date)
+    
+    positive = base_query.filter(
         DocumentModel.sentiment > SENTIMENT_POSITIVE_THRESHOLD
     ).scalar() or 0
-    neutral = db.query(func.count()).filter(
+    
+    neutral_query = db.query(func.count()).filter(
         DocumentModel.sentiment >= SENTIMENT_NEGATIVE_THRESHOLD,
         DocumentModel.sentiment <= SENTIMENT_POSITIVE_THRESHOLD,
-    ).scalar() or 0
-    negative = db.query(func.count()).filter(
+    )
+    if start_date:
+        neutral_query = neutral_query.filter(DocumentModel.collected_at >= start_date)
+    if end_date:
+        neutral_query = neutral_query.filter(DocumentModel.collected_at <= end_date)
+    neutral = neutral_query.scalar() or 0
+    
+    negative_query = db.query(func.count()).filter(
         DocumentModel.sentiment < SENTIMENT_NEGATIVE_THRESHOLD
-    ).scalar() or 0
+    )
+    if start_date:
+        negative_query = negative_query.filter(DocumentModel.collected_at >= start_date)
+    if end_date:
+        negative_query = negative_query.filter(DocumentModel.collected_at <= end_date)
+    negative = negative_query.scalar() or 0
+    
     return positive, neutral, negative
 
 
 @router.get("/trends")
-async def get_trends(db: Session = Depends(get_db)):
+async def get_trends(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
     """Trending topics with real database aggregation and AI sentiment scores."""
+    # Parse date filters
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_date else None
+    
     try:
-        topic_query = text("""
+        date_filter = ""
+        if start_dt:
+            date_filter += f" AND d.collected_at >= '{start_dt.isoformat()}'"
+        if end_dt:
+            date_filter += f" AND d.collected_at <= '{end_dt.isoformat()}'"
+        
+        topic_query = text(f"""
             SELECT t.topic_name, COUNT(*) as count, AVG(d.sentiment) as avg_sentiment
             FROM documents d, json_array_elements_text(d.topics) AS t(topic_name)
             WHERE d.topics IS NOT NULL AND d.topics::text != '[]' AND d.topics::text != 'null'
+            {date_filter}
             GROUP BY t.topic_name
             ORDER BY count DESC
             LIMIT 10
@@ -63,11 +99,16 @@ async def get_trends(db: Session = Depends(get_db)):
             "momentum": "stable",
         })
 
-    overall_sentiment = db.query(func.avg(DocumentModel.sentiment)).filter(
+    sentiment_query = db.query(func.avg(DocumentModel.sentiment)).filter(
         DocumentModel.sentiment.isnot(None)
-    ).scalar()
+    )
+    if start_dt:
+        sentiment_query = sentiment_query.filter(DocumentModel.collected_at >= start_dt)
+    if end_dt:
+        sentiment_query = sentiment_query.filter(DocumentModel.collected_at <= end_dt)
+    overall_sentiment = sentiment_query.scalar()
 
-    positive, neutral, negative = _bucket_sentiments(db)
+    positive, neutral, negative = _bucket_sentiments(db, start_dt, end_dt)
     total = positive + neutral + negative
 
     return {
@@ -80,6 +121,10 @@ async def get_trends(db: Session = Depends(get_db)):
                 "negative": round(negative / total * 100) if total > 0 else 0,
             },
         },
+        "date_range": {
+            "start": start_date,
+            "end": end_date,
+        }
     }
 
 
@@ -124,14 +169,29 @@ async def get_topic_sentiment(topic: str, db: Session = Depends(get_db)):
 
 
 @router.get("/engagement")
-async def get_engagement_stats(db: Session = Depends(get_db)):
+async def get_engagement_stats(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
     """
     Engagement statistics: top posts, posting frequency, top commenters, platform breakdown, sentiment.
     Uses RAG to ground analysis in actual collected data.
+    Supports date range filtering.
     """
+    # Parse date filters
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d") if start_date else None
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59) if end_date else None
+    
+    # Base query with date filters
+    base_query = db.query(DocumentModel).filter(DocumentModel.status != "pending_ai_review")
+    if start_dt:
+        base_query = base_query.filter(DocumentModel.collected_at >= start_dt)
+    if end_dt:
+        base_query = base_query.filter(DocumentModel.collected_at <= end_dt)
+    
     top_posts = (
-        db.query(DocumentModel)
-        .filter(DocumentModel.status != "pending_ai_review")
+        base_query
         .order_by(
             desc(
                 (DocumentModel.likes_count or 0)

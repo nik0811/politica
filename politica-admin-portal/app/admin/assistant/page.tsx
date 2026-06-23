@@ -370,7 +370,7 @@ export default function AssistantPage() {
                 <TrendingUp className="size-5 text-green-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">{analysis.sentiment_overview.distribution.positive}%</p>
+                <p className="text-2xl font-bold text-foreground">{analysis.sentiment_overview?.distribution?.positive ?? 0}%</p>
                 <p className="text-xs text-muted-foreground">Positive Sentiment</p>
               </div>
             </CardContent>
@@ -381,7 +381,7 @@ export default function AssistantPage() {
                 <AlertCircle className="size-5 text-red-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-foreground">{analysis.sentiment_overview.distribution.negative}%</p>
+                <p className="text-2xl font-bold text-foreground">{analysis.sentiment_overview?.distribution?.negative ?? 0}%</p>
                 <p className="text-xs text-muted-foreground">Negative Sentiment</p>
               </div>
             </CardContent>

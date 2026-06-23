@@ -15,7 +15,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
-from models.models import Document, Topic, Entity, Promise, generate_uuid
+from models.models import Document, Topic, Entity, Promise, PostComment, generate_uuid
 from llm import chat_completion, LLM_MODEL
 from services.search import retrieve_context_for_document, add_document_to_index
 
@@ -280,3 +280,117 @@ def get_pending_document_ids(db: Session, limit: int = 50) -> list[str]:
         .all()
     )
     return [d.id for d in docs]
+
+
+# ─── Comment Processing ─────────────────────────────────────────────────────────
+
+COMMENT_SYSTEM_PROMPT = """You are a political sentiment analyst specializing in Indian politics.
+Analyze the given social media comment and extract structured information.
+
+Return ONLY valid JSON (no markdown fences, no explanation) with this exact structure:
+{
+  "sentiment": <float -1.0 to 1.0, where -1.0=very negative, 0.0=neutral, 1.0=very positive>,
+  "sentiment_label": "<positive|negative|neutral>",
+  "topics": [<list of 0-3 short topic strings if relevant>],
+  "entities": [
+    {"name": "<entity name>", "type": "<PERSON|ORGANIZATION|LOCATION>"}
+  ]
+}
+
+Rules:
+- sentiment: assess the comment's tone toward the subject matter
+- sentiment_label: "positive" if sentiment > 0.3, "negative" if sentiment < -0.3, else "neutral"
+- topics: only include if clearly relevant to a political topic
+- entities: only extract clearly named politicians, parties, or places
+- Keep responses concise - comments are short"""
+
+
+async def process_comment(comment_id: str) -> bool:
+    """
+    Process a single comment with the LLM for sentiment analysis.
+    Returns True on success, False on failure.
+    """
+    db: Session = SessionLocal()
+    try:
+        comment = db.query(PostComment).filter(PostComment.id == comment_id).first()
+        if not comment:
+            logger.error("Comment %s not found", comment_id)
+            return False
+
+        if comment.processed_at is not None:
+            logger.info("Comment %s already processed, skipping", comment_id)
+            return True
+
+        # Build prompt
+        prompt_text = f"Comment by @{comment.author_handle or comment.author or 'unknown'}:\n{comment.content[:500]}"
+
+        try:
+            raw_response = await chat_completion(
+                messages=[
+                    {"role": "system", "content": COMMENT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt_text},
+                ],
+                model=LLM_MODEL,
+                temperature=0.1,
+                max_tokens=300,
+                json_mode=True,
+            )
+            result = _parse_llm_response(raw_response)
+        except Exception as exc:
+            logger.error("LLM call failed for comment %s: %s", comment_id, exc)
+            return False
+
+        # Apply results
+        raw_sentiment = result.get("sentiment")
+        if isinstance(raw_sentiment, (int, float)):
+            comment.sentiment = max(-1.0, min(1.0, float(raw_sentiment)))
+        
+        comment.sentiment_label = result.get("sentiment_label", "neutral")
+        comment.topics = result.get("topics", [])
+        comment.entities = [e.get("name") for e in result.get("entities", []) if isinstance(e, dict)]
+        comment.processed_at = datetime.utcnow()
+        
+        db.commit()
+
+        logger.info(
+            "Processed comment %s: sentiment=%.2f (%s)",
+            comment_id,
+            comment.sentiment or 0,
+            comment.sentiment_label,
+        )
+        return True
+
+    except Exception as exc:
+        logger.error("Unexpected error processing comment %s: %s", comment_id, exc)
+        return False
+    finally:
+        db.close()
+
+
+async def process_comments_batch(comment_ids: list[str], concurrency: int = 5) -> dict:
+    """
+    Process multiple comments concurrently.
+    Returns summary: {"processed": N, "failed": M}
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _guarded(cid: str) -> bool:
+        async with semaphore:
+            return await process_comment(cid)
+
+    results = await asyncio.gather(*[_guarded(cid) for cid in comment_ids], return_exceptions=True)
+
+    processed = sum(1 for r in results if r is True)
+    failed = sum(1 for r in results if r is False or isinstance(r, Exception))
+    return {"processed": processed, "failed": failed, "total": len(comment_ids)}
+
+
+def get_pending_comment_ids(db: Session, limit: int = 100) -> list[str]:
+    """Return IDs of comments that haven't been processed yet."""
+    comments = (
+        db.query(PostComment.id)
+        .filter(PostComment.processed_at.is_(None))
+        .limit(limit)
+        .all()
+    )
+    return [c.id for c in comments]

@@ -5,7 +5,7 @@ from typing import List, Optional, Union
 from pydantic import BaseModel
 from datetime import datetime
 from database import get_db
-from models.models import AgentJob, Document as DocumentModel
+from models.models import AgentJob, Document as DocumentModel, PostComment
 from auth import get_current_user, require_role
 import uuid
 import logging
@@ -74,7 +74,7 @@ AGENT_DEFINITIONS = [
 
 class RunAgentRequest(BaseModel):
     agent_type: str
-    document_ids: Union[List[str], str]  # list of IDs, "all", or "pending"
+    document_ids: Union[List[str], str]  # list of IDs, "all", "pending", or "comments"
     options: Optional[dict] = None
 
 
@@ -111,16 +111,23 @@ async def run_agent(
     db: Session = Depends(get_db),
     _: dict = Depends(require_role(["Admin", "Editor"])),
 ):
-    """Enqueue an agent job to run on documents"""
+    """Enqueue an agent job to run on documents and/or comments"""
     valid_types = {a["agent_type"] for a in AGENT_DEFINITIONS}
     if body.agent_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Unknown agent_type: {body.agent_type}")
 
-    # Determine how many documents will be processed
+    # Determine how many items will be processed
     if body.document_ids == "all":
-        total = db.query(func.count()).select_from(DocumentModel).scalar() or 0
+        doc_count = db.query(func.count()).select_from(DocumentModel).scalar() or 0
+        comment_count = db.query(func.count()).select_from(PostComment).scalar() or 0
+        total = doc_count + comment_count
     elif body.document_ids == "pending":
-        total = db.query(func.count()).filter(DocumentModel.status == "pending").scalar() or 0
+        doc_count = db.query(func.count()).select_from(DocumentModel).filter(DocumentModel.status == "pending").scalar() or 0
+        comment_count = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
+        total = doc_count + comment_count
+    elif body.document_ids == "comments":
+        # Process only unprocessed comments
+        total = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
     else:
         total = len(body.document_ids) if isinstance(body.document_ids, list) else 0
 
@@ -221,7 +228,7 @@ async def run_daily_agents(
     db: Session = Depends(get_db),
     _: dict = Depends(require_role(["Admin", "Editor"])),
 ):
-    """Manually trigger the daily agent run"""
+    """Manually trigger the daily agent run on documents and comments"""
     agents_to_run = [
         "sentiment_analysis",
         "entity_extraction",
@@ -232,7 +239,10 @@ async def run_daily_agents(
     jobs = []
     for agent_type in agents_to_run:
         # Count pending documents
-        total = db.query(func.count()).filter(DocumentModel.status == "pending").scalar() or 0
+        doc_count = db.query(func.count()).select_from(DocumentModel).filter(DocumentModel.status == "pending").scalar() or 0
+        # Count unprocessed comments
+        comment_count = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
+        total = doc_count + comment_count
         
         if total > 0:
             job = AgentJob(

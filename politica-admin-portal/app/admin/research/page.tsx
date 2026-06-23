@@ -5,9 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { apiClient } from "@/lib/api-client"
 import { Send, Bot, User, Loader2, FileText, BookMarked, Users, Plus, Trash2, MessageSquare } from "lucide-react"
+import ReactMarkdown from "react-markdown"
 
 interface Message {
   id: string
@@ -194,14 +194,14 @@ export default function ResearchPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Conversations Sidebar */}
         <div className="lg:col-span-1">
-          <Card className="bg-card border-border h-full flex flex-col" style={{ height: "calc(100vh - 12rem)" }}>
+          <Card className="bg-card border-border flex flex-col overflow-hidden" style={{ height: "calc(100vh - 12rem)" }}>
             <CardHeader className="pb-3 border-b border-border shrink-0">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
                 <MessageSquare className="size-4 text-primary" /> Conversations
               </CardTitle>
             </CardHeader>
 
-            <ScrollArea className="flex-1 px-3 py-3">
+            <div className="flex-1 overflow-y-auto px-3 py-3">
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={startNewConversation}
@@ -245,12 +245,12 @@ export default function ResearchPage() {
                   ))
                 )}
               </div>
-            </ScrollArea>
+            </div>
           </Card>
         </div>
 
         {/* Chat Area */}
-        <Card className="lg:col-span-2 bg-card border-border flex flex-col" style={{ height: "calc(100vh - 12rem)" }}>
+        <Card className="lg:col-span-2 bg-card border-border flex flex-col overflow-hidden" style={{ height: "calc(100vh - 12rem)" }}>
           <CardHeader className="pb-3 border-b border-border shrink-0">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Bot className="size-4 text-primary" /> Research Assistant
@@ -263,7 +263,7 @@ export default function ResearchPage() {
             )}
           </CardHeader>
 
-          <ScrollArea className="flex-1 px-4 py-3">
+          <div className="flex-1 overflow-y-auto px-4 py-3">
             <div className="flex flex-col gap-4">
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
@@ -286,7 +286,37 @@ export default function ResearchPage() {
                           : "bg-muted text-foreground"
                       }`}
                     >
-                      {msg.content}
+                      {msg.role === "user" ? (
+                        msg.content
+                      ) : (
+                        <ReactMarkdown
+                          components={{
+                            h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
+                            h2: ({ children }) => <h2 className="text-base font-semibold mb-2">{children}</h2>,
+                            h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
+                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                            ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                            ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                            li: ({ children }) => <li className="text-sm">{children}</li>,
+                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                            table: ({ children }) => (
+                              <div className="overflow-x-auto my-2">
+                                <table className="min-w-full text-xs border-collapse">{children}</table>
+                              </div>
+                            ),
+                            thead: ({ children }) => <thead className="bg-background/50">{children}</thead>,
+                            tbody: ({ children }) => <tbody>{children}</tbody>,
+                            tr: ({ children }) => <tr className="border-b border-border/50">{children}</tr>,
+                            th: ({ children }) => <th className="px-2 py-1.5 text-left font-semibold">{children}</th>,
+                            td: ({ children }) => <td className="px-2 py-1.5">{children}</td>,
+                            code: ({ children }) => (
+                              <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
+                            ),
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      )}
                     </div>
                     {msg.sources && msg.sources.length > 0 && (
                       <div className="flex flex-wrap gap-1">
@@ -327,7 +357,7 @@ export default function ResearchPage() {
               )}
               <div ref={bottomRef} />
             </div>
-          </ScrollArea>
+          </div>
 
           <div className="p-4 border-t border-border shrink-0">
             <div className="flex gap-2">

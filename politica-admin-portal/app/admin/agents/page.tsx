@@ -1,14 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { apiClient, Agent } from "@/lib/api-client"
+import { apiClient } from "@/lib/api-client"
 import {
-  Brain, Cpu, Tag, BookMarked, Zap, Loader2, Play, CheckCircle2, AlertCircle, Clock, RefreshCw, FlaskConical
+  Brain, Cpu, Tag, BookMarked, Zap, Loader2, Play, CheckCircle2, AlertCircle, Clock, RefreshCw, FlaskConical, Settings
 } from "lucide-react"
 
 const AGENT_ICONS: Record<string, React.ElementType> = {
@@ -26,7 +24,6 @@ const STATUS_STYLE: Record<string, { label: string; color: string; icon: React.E
   failed: { label: "Failed", color: "text-destructive", icon: AlertCircle },
 }
 
-// Agents that use the configured LLM provider — no longer needed (provider comes from API)
 const PROVIDER_BADGE: Record<string, { label: string; className: string }> = {
   bedrock:  { label: "Bedrock",  className: "bg-orange-500/15 text-orange-400 border-orange-500/20" },
   ollama:   { label: "Ollama",   className: "bg-green-500/15 text-green-400 border-green-500/20" },
@@ -38,7 +35,6 @@ function providerBadgeProps(provider: string) {
 }
 
 function shortModelName(model: string): string {
-  // e.g. "bedrock/anthropic.claude-3-sonnet-20240229-v1:0" → "Claude 3 Sonnet"
   const part = model?.split("/").pop() ?? model
   if (part.includes("claude-3-sonnet")) return "Claude 3 Sonnet"
   if (part.includes("claude-3-haiku"))  return "Claude 3 Haiku"
@@ -51,13 +47,8 @@ function shortModelName(model: string): string {
 }
 
 export default function AgentsPage() {
-  const [agents, setAgents] = useState<Agent[]>([])
   const [jobs, setJobs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedAgent, setSelectedAgent] = useState("")
-  const [scope, setScope] = useState<"all" | "pending">("pending")
-  const [submitting, setSubmitting] = useState(false)
 
   const [currentProvider, setCurrentProvider] = useState<string>("")
   const [currentModel, setCurrentModel] = useState<string>("")
@@ -74,11 +65,7 @@ export default function AgentsPage() {
 
   async function fetchData() {
     try {
-      const [agentList, jobList] = await Promise.all([
-        apiClient.getAgents().catch(() => []),
-        apiClient.getAgentJobs({ limit: 20 }).catch(() => []),
-      ])
-      setAgents(agentList)
+      const jobList = await apiClient.getAgentJobs({ limit: 50 }).catch(() => [])
       setJobs(jobList)
     } catch (error) {
       console.error("Failed to fetch agent data:", error)
@@ -93,7 +80,7 @@ export default function AgentsPage() {
       setCurrentProvider(data.current_provider ?? "")
       setCurrentModel(data.current_model ?? "")
     } catch {
-      // silently ignore — LLM config is informational
+      // silently ignore
     }
   }
 
@@ -105,7 +92,7 @@ export default function AgentsPage() {
       setSchedulerMinute(data.minute ?? 0)
       setLastRun(data.last_run ?? null)
     } catch {
-      // silently ignore — scheduler config is informational
+      // silently ignore
     }
   }
 
@@ -159,23 +146,22 @@ export default function AgentsPage() {
     }
   }
 
-  async function handleRunDailyNow() {
+  async function handleRunNow() {
     setRunningDaily(true)
     setRunMessage(null)
     try {
       const result = await apiClient.runDailyAgents()
       setLastRun(result.timestamp)
       setRunMessage({
-        text: "✓ All agents queued for processing. Jobs added to queue for Sentiment Analysis, Entity Extraction, Topic Classification, and Promise Extraction.",
+        text: `✓ Processing started. ${result.jobs_created} jobs queued.`,
         type: "success"
       })
       await fetchData()
-      // Clear message after 5 seconds
       setTimeout(() => setRunMessage(null), 5000)
     } catch (error) {
-      console.error("Failed to run daily agents:", error)
+      console.error("Failed to run agents:", error)
       setRunMessage({
-        text: "✗ Failed to queue agents. Please try again.",
+        text: "✗ Failed to start processing. Please try again.",
         type: "error"
       })
     } finally {
@@ -197,20 +183,11 @@ export default function AgentsPage() {
     return () => clearInterval(timer)
   }, [jobs])
 
-  async function handleRunAgent() {
-    if (!selectedAgent) return
-    setSubmitting(true)
-    try {
-      await apiClient.runAgent({ agent_type: selectedAgent, document_ids: scope })
-      setDialogOpen(false)
-      setSelectedAgent("")
-      await fetchData()
-    } catch (error) {
-      console.error("Failed to run agent:", error)
-    } finally {
-      setSubmitting(false)
-    }
-  }
+  // Filter to show only active jobs (pending/running) or recent completed
+  const activeJobs = jobs.filter(j => j.status === "pending" || j.status === "running")
+  const recentCompletedJobs = jobs
+    .filter(j => j.status === "completed" || j.status === "failed")
+    .slice(0, 10)
 
   if (loading) {
     return (
@@ -224,20 +201,18 @@ export default function AgentsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-foreground">AI Agents</h1>
+          <h1 className="text-lg font-semibold text-foreground">AI Processing</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Run NLP processing agents on collected documents
+            Automated document and comment analysis
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={fetchData} className="h-8">
-            <RefreshCw className="size-3.5 mr-1.5" />
-            Refresh
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={fetchData} className="h-8">
+          <RefreshCw className="size-3.5 mr-1.5" />
+          Refresh
+        </Button>
       </div>
 
-      {/* LLM Provider Status Bar */}
+      {/* LLM Provider Status */}
       {currentProvider && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-border bg-card">
           <span className="text-xs font-medium text-muted-foreground">LLM Provider</span>
@@ -270,20 +245,81 @@ export default function AgentsPage() {
         </div>
       )}
 
-      {/* Daily Scheduler Section */}
+      {/* Active Jobs - Only show if there are running jobs */}
+      {activeJobs.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3 flex items-center gap-2">
+            <Loader2 className="size-3 animate-spin" />
+            Currently Processing
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {activeJobs.map((job) => {
+              const Icon = AGENT_ICONS[job.agent_type] || Brain
+              const cfg = STATUS_STYLE[job.status] || STATUS_STYLE.pending
+              const StatusIcon = cfg.icon
+              const progress = job.documents_total > 0 
+                ? Math.round((job.documents_processed / job.documents_total) * 100) 
+                : 0
+              
+              return (
+                <Card key={job.id} className="bg-card border-border border-l-4 border-l-primary">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                        <Icon className="size-4 text-primary" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">{job.agent_type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</p>
+                        <div className={`flex items-center gap-1 text-xs ${cfg.color}`}>
+                          <StatusIcon className={`size-3 ${job.status === "running" ? "animate-spin" : ""}`} />
+                          {cfg.label}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>Progress</span>
+                        <span>{job.documents_processed}/{job.documents_total}</span>
+                      </div>
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-primary transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Automation Settings */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between mb-3">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Settings className="size-4" />
+              Automation Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold text-foreground">Daily Agent Scheduler</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Automatically run all agents daily</p>
+                <p className="text-sm font-medium">Auto-process new data</p>
+                <p className="text-xs text-muted-foreground">Run agents when new posts are collected</p>
               </div>
-              <div className={`size-2 rounded-full shrink-0 ${schedulerEnabled ? "bg-green-500" : "bg-muted-foreground/30"}`} />
+              <div className="size-2 rounded-full bg-green-500" title="Always enabled" />
             </div>
             
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
+            <div className="border-t border-border pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-sm font-medium">Scheduled daily run</p>
+                  <p className="text-xs text-muted-foreground">Process all pending items at set time</p>
+                </div>
                 <input
                   type="checkbox"
                   checked={schedulerEnabled}
@@ -291,11 +327,10 @@ export default function AgentsPage() {
                   disabled={schedulerUpdating}
                   className="w-4 h-4 rounded border-border"
                 />
-                <span className="text-xs text-foreground">Enable daily runs</span>
               </div>
 
               {schedulerEnabled && (
-                <div className="flex items-center gap-2 pl-6">
+                <div className="flex items-center gap-2 pl-0">
                   <label className="text-xs text-muted-foreground">Run at:</label>
                   <select
                     value={schedulerHour}
@@ -322,145 +357,87 @@ export default function AgentsPage() {
               )}
 
               {lastRun && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground mt-3">
                   Last run: {new Date(lastRun).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
                 </p>
               )}
+            </div>
 
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs w-full mt-2"
-                onClick={handleRunDailyNow}
-                disabled={runningDaily}
-              >
-                {runningDaily ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <Play className="size-3 mr-1.5" />}
-                Run Now
-              </Button>
+            <Button
+              size="sm"
+              className="w-full"
+              onClick={handleRunNow}
+              disabled={runningDaily || activeJobs.length > 0}
+            >
+              {runningDaily ? <Loader2 className="size-3 mr-1.5 animate-spin" /> : <Play className="size-3 mr-1.5" />}
+              {activeJobs.length > 0 ? "Processing in progress..." : "Run All Agents Now"}
+            </Button>
 
-              {runMessage && (
-                <div className={`mt-3 p-2.5 rounded-lg text-xs ${
-                  runMessage.type === "success"
-                    ? "bg-green-500/10 border border-green-500/20 text-green-700"
-                    : "bg-destructive/10 border border-destructive/20 text-destructive"
-                }`}>
-                  {runMessage.text}
+            {runMessage && (
+              <div className={`p-2.5 rounded-lg text-xs ${
+                runMessage.type === "success"
+                  ? "bg-green-500/10 border border-green-500/20 text-green-600"
+                  : "bg-destructive/10 border border-destructive/20 text-destructive"
+              }`}>
+                {runMessage.text}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Processing Pipeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground mb-4">
+              Agents run in sequence on all pending documents and comments:
+            </p>
+            <div className="space-y-3">
+              {[
+                { name: "Sentiment Analyzer", desc: "Classifies positive/negative/neutral", icon: Brain },
+                { name: "Entity Extractor", desc: "Identifies politicians, parties, places", icon: Cpu },
+                { name: "Topic Classifier", desc: "Assigns topic labels", icon: Tag },
+                { name: "Promise Extractor", desc: "Detects political commitments", icon: BookMarked },
+                { name: "Embedding Generator", desc: "Creates search vectors", icon: Zap },
+              ].map((agent, i) => (
+                <div key={agent.name} className="flex items-center gap-3">
+                  <div className="flex items-center justify-center size-6 rounded bg-muted text-xs font-medium text-muted-foreground">
+                    {i + 1}
+                  </div>
+                  <agent.icon className="size-4 text-primary" />
+                  <div className="flex-1">
+                    <p className="text-xs font-medium">{agent.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{agent.desc}</p>
+                  </div>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card border-border">
-          <CardContent className="p-4">
-            <div>
-              <p className="text-sm font-semibold text-foreground mb-3">Daily Agents</p>
-              <div className="space-y-2">
-                {["Sentiment Analyzer", "Entity Extractor", "Topic Classifier", "Promise Extractor"].map((name) => (
-                  <div key={name} className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <div className="size-1.5 rounded-full bg-primary/60" />
-                    {name}
-                  </div>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground mt-3">
-                Processes all pending documents when scheduler runs
-              </p>
+              ))}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Agent Cards */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">Available Agents</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {agents.map((agent) => {
-            const Icon = AGENT_ICONS[agent.agent_type] || Brain
-            const isLLMAgent = agent.provider && agent.provider !== "local"
-            const displayModel = isLLMAgent ? shortModelName(agent.model) : agent.model
-            const badge = isLLMAgent ? providerBadgeProps(agent.provider) : null
-            return (
-              <Card key={agent.agent_type} className="bg-card border-border hover:border-primary/20 transition-colors">
-                <CardContent className="p-4 flex flex-col gap-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <div className="size-8 rounded-lg bg-primary/10 border border-primary/15 flex items-center justify-center shrink-0">
-                        <Icon className="size-4 text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground leading-tight">{agent.name}</p>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          {badge && (
-                            <Badge
-                              variant="outline"
-                              className={`text-[9px] h-4 px-1.5 font-semibold border ${badge.className}`}
-                            >
-                              {badge.label}
-                            </Badge>
-                          )}
-                          <Badge variant="secondary" className="text-[9px] h-4">{displayModel}</Badge>
-                        </div>
-                      </div>
-                    </div>
-                    <span className={`size-2 rounded-full mt-1 shrink-0 ${agent.status === "available" ? "bg-[var(--chart-3)]" : "bg-muted-foreground/30"}`} />
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">{agent.description}</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs mt-auto"
-                    onClick={() => {
-                      setSelectedAgent(agent.agent_type)
-                      setDialogOpen(true)
-                    }}
-                  >
-                    <Play className="size-3 mr-1.5" />
-                    Run Agent
-                  </Button>
-                </CardContent>
-              </Card>
-            )
-          })}
-
-          {agents.length === 0 && (
-            <div className="col-span-full text-center py-12 text-muted-foreground">
-              <Brain className="size-10 mx-auto mb-3 opacity-20" />
-              <p className="text-sm">No agents available. Check API connection.</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Jobs */}
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">Recent Jobs</p>
-        <Card className="bg-card border-border">
-          <CardContent className="p-0">
-            {jobs.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground">
-                <Clock className="size-8 mx-auto mb-3 opacity-20" />
-                <p className="text-sm">No jobs yet. Run an agent to get started.</p>
-              </div>
-            ) : (
+      {/* Recent Completed Jobs */}
+      {recentCompletedJobs.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-3">Recent Jobs</p>
+          <Card className="bg-card border-border">
+            <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Job ID</th>
                       <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Agent</th>
                       <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Status</th>
-                      <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Progress</th>
-                      <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Started</th>
+                      <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Processed</th>
                       <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Completed</th>
                       <th className="text-left text-muted-foreground font-medium px-4 py-2.5 uppercase tracking-wider">Duration</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {jobs.map((job) => {
+                    {recentCompletedJobs.map((job) => {
                       const cfg = STATUS_STYLE[job.status] || STATUS_STYLE.pending
                       const StatusIcon = cfg.icon
-                      const agentDef = agents.find((a) => a.agent_type === job.agent_type)
                       const durationMs = job.started_at && job.completed_at
                         ? new Date(job.completed_at).getTime() - new Date(job.started_at).getTime()
                         : null
@@ -469,21 +446,17 @@ export default function AgentsPage() {
                         : "—"
                       return (
                         <tr key={job.id} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
-                          <td className="px-4 py-3 font-mono text-muted-foreground">{job.id.slice(0, 8)}…</td>
-                          <td className="px-4 py-3 text-foreground font-medium">{agentDef?.name || job.agent_type}</td>
+                          <td className="px-4 py-3 text-foreground font-medium">
+                            {job.agent_type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                          </td>
                           <td className="px-4 py-3">
                             <div className={`flex items-center gap-1.5 ${cfg.color}`}>
-                              <StatusIcon className={`size-3 ${job.status === "running" ? "animate-spin" : ""}`} />
+                              <StatusIcon className="size-3" />
                               <span className="capitalize font-medium">{cfg.label}</span>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
-                            {job.documents_processed}/{job.documents_total} docs
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                            {job.started_at
-                              ? new Date(job.started_at).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })
-                              : "—"}
+                            {job.documents_processed}/{job.documents_total}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                             {job.completed_at
@@ -497,56 +470,21 @@ export default function AgentsPage() {
                   </tbody>
                 </table>
               </div>
-            )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Empty state when no jobs */}
+      {activeJobs.length === 0 && recentCompletedJobs.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-12 text-center">
+            <CheckCircle2 className="size-10 mx-auto mb-3 text-green-500/50" />
+            <p className="text-sm text-muted-foreground">All caught up! No pending processing jobs.</p>
+            <p className="text-xs text-muted-foreground mt-1">New data will be processed automatically.</p>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Run Agent Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md bg-card border-border">
-          <DialogHeader>
-            <DialogTitle>Run Agent</DialogTitle>
-          </DialogHeader>
-
-          <div className="flex flex-col gap-4 py-2">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent Type</label>
-              <Select value={selectedAgent} onValueChange={setSelectedAgent}>
-                <SelectTrigger className="h-9 bg-input border-border text-sm">
-                  <SelectValue placeholder="Select agent..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.map((a) => (
-                    <SelectItem key={a.agent_type} value={a.agent_type}>{a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Document Scope</label>
-              <Select value={scope} onValueChange={(v) => setScope(v as "all" | "pending")}>
-                <SelectTrigger className="h-9 bg-input border-border text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pending documents only</SelectItem>
-                  <SelectItem value="all">All documents</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={handleRunAgent} disabled={!selectedAgent || submitting}>
-              {submitting ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Play className="size-3.5 mr-1.5" />}
-              Run Agent
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      )}
     </div>
   )
 }

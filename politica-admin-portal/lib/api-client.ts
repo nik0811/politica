@@ -261,16 +261,23 @@ class APIClient {
   async getTrends(params?: { 
     period?: "day" | "week" | "month"
     topic?: string
+    start_date?: string
+    end_date?: string
   }): Promise<TrendData[]> {
     const queryParams = new URLSearchParams()
     if (params?.period) queryParams.append("period", params.period)
     if (params?.topic) queryParams.append("topic", params.topic)
+    if (params?.start_date) queryParams.append("start_date", params.start_date)
+    if (params?.end_date) queryParams.append("end_date", params.end_date)
 
     const query = queryParams.toString()
     return this.request<TrendData[]>(`/api/analytics/trends${query ? `?${query}` : ""}`)
   }
 
-  async getEngagementStats(): Promise<{
+  async getEngagementStats(params?: {
+    start_date?: string
+    end_date?: string
+  }): Promise<{
     top_posts: {
       id: string
       title: string
@@ -288,7 +295,11 @@ class APIClient {
     platform_breakdown: { platform: string; count: number; percentage: number }[]
     sentiment_distribution: { total_processed: number; positive: number; neutral: number; negative: number }
   }> {
-    return this.request<any>("/api/analytics/engagement")
+    const queryParams = new URLSearchParams()
+    if (params?.start_date) queryParams.append("start_date", params.start_date)
+    if (params?.end_date) queryParams.append("end_date", params.end_date)
+    const query = queryParams.toString()
+    return this.request<any>(`/api/analytics/engagement${query ? `?${query}` : ""}`)
   }
 
   async getTopicsEngagement(): Promise<{

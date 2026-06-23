@@ -156,14 +156,23 @@ export default function DashboardPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  
+  // Date range filter
+  const [startDate, setStartDate] = useState<string>("")
+  const [endDate, setEndDate] = useState<string>("")
 
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     else setLoading(true)
 
     try {
+      const dateParams = {
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+      }
+      
       const [engagementData, topicsData, weeklyData, segmentationData] = await Promise.all([
-        apiClient.getEngagementStats().catch(() => null),
+        apiClient.getEngagementStats(dateParams).catch(() => null),
         apiClient.getTopicsEngagement().catch(() => ({ topics: [] })),
         apiClient.getWeeklyTrends().catch(() => ({ weekly_trends: [] })),
         apiClient.getSentimentSegmentation().catch(() => null),
@@ -172,16 +181,24 @@ export default function DashboardPage() {
       if (engagementData) {
         const { sentiment_distribution: sd, top_commenters } = engagementData
         const total = sd.total_processed || 1
+        
+        // Calculate sentiment score based on distribution percentages
+        // Positive = 100, Neutral = 50, Negative = 0
+        // Score = weighted average based on actual percentages
+        const positivePct = sd.positive / total
+        const neutralPct = sd.neutral / total
+        const negativePct = sd.negative / total
+        
         const overall = sd.total_processed > 0
-          ? (sd.positive * 0.85 + sd.neutral * 0.5 + sd.negative * 0.15) / total
+          ? (positivePct * 1.0) + (neutralPct * 0.5) + (negativePct * 0.0)
           : 0.5
 
         setSentiment({
           overall: Math.round(overall * 100) / 100,
           distribution: {
-            positive: Math.round((sd.positive / total) * 100),
-            neutral: Math.round((sd.neutral / total) * 100),
-            negative: Math.round((sd.negative / total) * 100),
+            positive: Math.round(positivePct * 100),
+            neutral: Math.round(neutralPct * 100),
+            negative: Math.round(negativePct * 100),
           },
           counts: {
             positive: sd.positive,
@@ -204,7 +221,7 @@ export default function DashboardPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [])
+  }, [startDate, endDate])
 
   useEffect(() => { load() }, [load])
 
@@ -235,6 +252,34 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
+          {/* Date Range Filter */}
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="h-7 text-xs px-2 rounded border border-border bg-input text-foreground"
+              placeholder="Start date"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="h-7 text-xs px-2 rounded border border-border bg-input text-foreground"
+              placeholder="End date"
+            />
+            {(startDate || endDate) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs px-2"
+                onClick={() => { setStartDate(""); setEndDate(""); }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
           {lastUpdated && (
             <span className="text-[10px] text-muted-foreground hidden sm:block">
               Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}

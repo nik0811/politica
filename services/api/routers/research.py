@@ -118,6 +118,20 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
     search_engine = "keyword"
     semantic_doc_ids: List[str] = []
 
+    # Check if query is about topics
+    query_lower = request.query.lower()
+    is_topic_query = any(word in query_lower for word in ['topic', 'topics', 'issue', 'issues', 'subject', 'theme'])
+    
+    # Get topic statistics if relevant
+    topic_stats = []
+    if is_topic_query:
+        topic_stats = (
+            db.query(TopicModel)
+            .order_by(TopicModel.document_count.desc())
+            .limit(10)
+            .all()
+        )
+
     try:
         results = _qdrant_search(request.query, limit=request.max_results)
         semantic_doc_ids = [doc_id for doc_id, _score in results]
@@ -137,12 +151,36 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
             .all()
         )
     else:
-        relevant_docs = (
-            db.query(DocumentModel)
-            .filter(DocumentModel.content.ilike(f"%{query_lower}%"))
-            .limit(request.max_results)
-            .all()
-        )
+        # Improved keyword search: search in content, title, topics, and entities
+        # Split query into words and search for any match
+        query_words = [w.strip() for w in query_lower.split() if len(w.strip()) > 2]
+        
+        relevant_docs = []
+        if query_words:
+            from sqlalchemy import or_
+            
+            # Build OR conditions for each word
+            conditions = []
+            for word in query_words[:5]:  # Limit to 5 words
+                conditions.append(DocumentModel.content.ilike(f"%{word}%"))
+                conditions.append(DocumentModel.title.ilike(f"%{word}%"))
+            
+            relevant_docs = (
+                db.query(DocumentModel)
+                .filter(or_(*conditions))
+                .order_by(DocumentModel.collected_at.desc())
+                .limit(request.max_results)
+                .all()
+            )
+        
+        # If still no results, get recent documents
+        if not relevant_docs:
+            relevant_docs = (
+                db.query(DocumentModel)
+                .order_by(DocumentModel.collected_at.desc())
+                .limit(request.max_results)
+                .all()
+            )
 
     relevant_promises = (
         db.query(PromiseModel)
@@ -169,7 +207,21 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         })
         context.append({"text": promise.text, "source": f"{promise.entity} - {promise.topic}"})
 
-    if not sources:
+    # Add topic information to context if this is a topic query
+    if is_topic_query and topic_stats:
+        for topic in topic_stats:
+            sources.append({
+                "type": "topic",
+                "id": topic.id,
+                "name": topic.name,
+                "document_count": topic.document_count,
+            })
+            context.append({
+                "text": f"Topic '{topic.name}' appears in {topic.document_count} documents",
+                "source": f"Topic: {topic.name}"
+            })
+
+    if not sources and not topic_stats:
         answer = (
             f"I couldn't find specific information about '{request.query}' in the database. "
             "Try rephrasing your query or check if documents have been processed."
@@ -186,8 +238,16 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
     # Build context string for LLM synthesis
     doc_context = "\n\n".join([
         f"Source: {c['source']}\n{c['text']}"
-        for c in context[:5]
+        for c in context[:8]
     ])
+    
+    # Add topic summary if available
+    if topic_stats:
+        topic_summary = "Top topics by document count:\n" + "\n".join([
+            f"- {t.name}: {t.document_count} documents"
+            for t in topic_stats[:5]
+        ])
+        doc_context = topic_summary + "\n\n" + doc_context
 
     llm_used = False
     model_used = None
