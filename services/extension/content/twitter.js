@@ -144,16 +144,25 @@
         const likeText = likeBtn?.textContent?.trim() || '0'
         const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
         
-        console.log(`[Twitter Scraper] Found reply from ${author}: ${text.slice(0, 50)}...`)
+        const retweetBtn = replyEl.querySelector('[data-testid="retweet"]')
+        const retweetText = retweetBtn?.textContent?.trim() || '0'
+        const retweets = window.PoliticaCollector?.parseCount?.(retweetText) || 0
+        
+        console.log(`[Twitter Scraper] ✓ Reply from ${author}`)
+        console.log(`[Twitter Scraper]   Text: ${text.slice(0, 100)}${text.length > 100 ? '...' : ''}`)
+        console.log(`[Twitter Scraper]   ❤️ ${likes} likes | 🔄 ${retweets} retweets`)
         
         replies.push({
           author,
           text,
-          likes
+          likes,
+          retweets
         })
       }
       
-      console.log(`[Twitter Scraper] Sending ${replies.length} replies to service worker`)
+      console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
+      console.log(`[Twitter Scraper] Total replies extracted: ${replies.length}`)
+      console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
       
       // Send to service worker
       chrome.runtime.sendMessage({
@@ -393,6 +402,19 @@
             saved++
             scraperState.postsCollected = saved
             scraperState.commentsCollected += replies.length
+
+            // Show detailed reply info in console
+            if (replies.length > 0) {
+              console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
+              console.log(`[Twitter Scraper] Post: ${text.slice(0, 80)}...`)
+              console.log(`[Twitter Scraper] Replies (${replies.length}):`)
+              replies.forEach((reply, idx) => {
+                console.log(`[Twitter Scraper]   ${idx + 1}. @${reply.author}`)
+                console.log(`[Twitter Scraper]      "${reply.text.slice(0, 80)}${reply.text.length > 80 ? '...' : ''}"`)
+                console.log(`[Twitter Scraper]      ❤️ ${reply.likes} | 🔄 ${reply.retweets || 0}`)
+              })
+              console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
+            }
 
             // Show progress
             window.PoliticaCollector.showNotification(
