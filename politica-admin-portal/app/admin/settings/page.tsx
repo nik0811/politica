@@ -1,288 +1,692 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Switch } from "@/components/ui/switch"
-import { Save, RefreshCw, Globe, Bell, Database, Shield, Cpu, Languages } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { apiClient } from "@/lib/api-client"
+import { Settings as SettingsIcon, Save, CheckCircle, Loader2, Bell, Shield, Cpu, Globe, Brain, RefreshCw, Wifi, WifiOff, Key, Plus, Copy, Check, Trash2, AlertTriangle } from "lucide-react"
 
-function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between py-3">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        {description && <span className="text-xs text-muted-foreground">{description}</span>}
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  )
+const categoryIcons = {
+  general: Globe,
+  notifications: Bell,
+  processing: Cpu,
+  security: Shield,
+}
+
+interface LLMModel {
+  id: string
+  provider: string
+  name: string
+  description: string
+  available: boolean
+}
+
+interface LLMInfo {
+  current_provider: string
+  current_model: string
+  models: LLMModel[]
+}
+
+const providerColors: Record<string, string> = {
+  ollama: "bg-green-500/10 text-green-600 border-green-500/20",
+  openai: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+  bedrock: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+}
+
+interface ApiToken {
+  id: string
+  name: string
+  description: string | null
+  token_prefix: string
+  is_active: boolean
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
 }
 
 export default function SettingsPage() {
+  const [settings, setSettings] = useState<any>({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [notifEmail, setNotifEmail] = useState(true)
-  const [notifSlack, setNotifSlack] = useState(false)
-  const [autoProcess, setAutoProcess] = useState(true)
-  const [nlpEnabled, setNlpEnabled] = useState(true)
-  const [multiLang, setMultiLang] = useState(true)
-  const [darkMode, setDarkMode] = useState(true)
-  const [twoFactor, setTwoFactor] = useState(false)
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const [llmInfo, setLlmInfo] = useState<LLMInfo | null>(null)
+  const [llmStatus, setLlmStatus] = useState<"idle" | "testing" | "ok" | "error">("idle")
+  const [llmTestResponse, setLlmTestResponse] = useState<string | null>(null)
+  const [llmLoading, setLlmLoading] = useState(false)
+
+  // API Tokens state
+  const [tokens, setTokens] = useState<ApiToken[]>([])
+  const [tokensLoading, setTokensLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showTokenDialog, setShowTokenDialog] = useState(false)
+  const [newRawToken, setNewRawToken] = useState("")
+  const [copied, setCopied] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [formName, setFormName] = useState("")
+  const [formDescription, setFormDescription] = useState("")
+  const [formExpiry, setFormExpiry] = useState("")
+
+  async function fetchSettings() {
+    try {
+      setLoading(true)
+      const data = await apiClient.getAllSettings()
+      setSettings(data || {})
+    } catch (error) {
+      console.error("Failed to fetch settings:", error)
+      setSettings({})
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function fetchLLMInfo() {
+    try {
+      setLlmLoading(true)
+      const data = await apiClient.getLLMProviderConfig()
+      console.log("LLM Config Response:", data)
+      setLlmInfo({
+        current_provider: data.active_provider,
+        current_model: data.active_model,
+        models: data.available_models
+      })
+    } catch (error) {
+      console.error("Failed to fetch LLM info:", error)
+    } finally {
+      setLlmLoading(false)
+    }
+  }
+
+  async function handleTestLLM() {
+    setLlmStatus("testing")
+    setLlmTestResponse(null)
+    try {
+      const result = await apiClient.testLLM()
+      if (result.status === "ok") {
+        setLlmStatus("ok")
+        setLlmTestResponse(result.response)
+      } else {
+        setLlmStatus("error")
+        setLlmTestResponse(result.error || "Unknown error")
+      }
+    } catch (error: any) {
+      setLlmStatus("error")
+      setLlmTestResponse(error?.message || "Request failed")
+    }
+  }
+
+  useEffect(() => {
+    fetchSettings()
+    fetchLLMInfo()
+    fetchTokens()
+  }, [])
+
+  // API Tokens functions
+  async function fetchTokens() {
+    try {
+      setTokensLoading(true)
+      const data = await apiClient.getApiTokens()
+      setTokens(data)
+    } catch (error) {
+      console.error("Failed to fetch tokens:", error)
+    } finally {
+      setTokensLoading(false)
+    }
+  }
+
+  async function handleGenerate() {
+    if (!formName.trim()) return
+    try {
+      setGenerating(true)
+      const result = await apiClient.generateApiToken({
+        name: formName.trim(),
+        description: formDescription.trim() || undefined,
+        expires_in_days: formExpiry ? parseInt(formExpiry) : undefined,
+      })
+      setNewRawToken(result.raw_token)
+      setShowCreateDialog(false)
+      setShowTokenDialog(true)
+      setFormName("")
+      setFormDescription("")
+      setFormExpiry("")
+      fetchTokens()
+    } catch (error) {
+      console.error("Failed to generate token:", error)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleToggleActive(token: ApiToken) {
+    try {
+      await apiClient.updateApiToken(token.id, { is_active: !token.is_active })
+      setTokens((prev) =>
+        prev.map((t) => (t.id === token.id ? { ...t, is_active: !t.is_active } : t))
+      )
+    } catch (error) {
+      console.error("Failed to toggle token:", error)
+    }
+  }
+
+  async function handleDeleteToken(tokenId: string) {
+    try {
+      await apiClient.deleteApiToken(tokenId)
+      setTokens((prev) => prev.filter((t) => t.id !== tokenId))
+      setDeleteConfirmId(null)
+    } catch (error) {
+      console.error("Failed to delete token:", error)
+    }
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(newRawToken)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  function getStatusBadge(token: ApiToken) {
+    if (!token.is_active) {
+      return <Badge variant="secondary">Revoked</Badge>
+    }
+    if (token.expires_at && new Date(token.expires_at) < new Date()) {
+      return <Badge variant="destructive">Expired</Badge>
+    }
+    return <Badge className="bg-green-500/10 text-green-600 border-green-500/20">Active</Badge>
+  }
+
+  function formatDate(dateStr: string | null) {
+    if (!dateStr) return "Never"
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  function updateValue(category: string, key: string, value: any) {
+    setSettings((prev: any) => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        [key]: { ...prev[category][key], value }
+      }
+    }))
+  }
+
+  async function handleSave() {
+    try {
+      setSaving(true)
+      await apiClient.bulkUpdateSettings(settings)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (error) {
+      console.error("Failed to save settings:", error)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    )
   }
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Configure platform preferences and system settings</p>
+          <h1 className="text-2xl font-semibold text-foreground">System Settings</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Configure platform behavior and integrations</p>
         </div>
-        <Button size="sm" onClick={handleSave} variant={saved ? "secondary" : "default"}>
-          <Save data-icon="inline-start" />
-          {saved ? "Saved!" : "Save Changes"}
-        </Button>
       </div>
 
-      <Tabs defaultValue="general">
-        <TabsList className="bg-muted/50 border border-border h-9">
-          <TabsTrigger value="general" className="text-xs h-7">General</TabsTrigger>
-          <TabsTrigger value="notifications" className="text-xs h-7">Notifications</TabsTrigger>
-          <TabsTrigger value="processing" className="text-xs h-7">Processing</TabsTrigger>
-          <TabsTrigger value="security" className="text-xs h-7">Security</TabsTrigger>
-          <TabsTrigger value="api" className="text-xs h-7">API Keys</TabsTrigger>
+      <Tabs defaultValue="general" className="w-full">
+        <TabsList>
+          <TabsTrigger value="general" className="gap-2">
+            <SettingsIcon className="size-4" />
+            General
+          </TabsTrigger>
+          <TabsTrigger value="tokens" className="gap-2">
+            <Key className="size-4" />
+            API Tokens
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="general" className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Globe className="size-4 text-primary" />
-                  <CardTitle className="text-base">Platform Info</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="platform-name">Platform Name</Label>
-                  <Input id="platform-name" defaultValue="Politica" className="bg-background" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="org-name">Organisation</Label>
-                  <Input id="org-name" defaultValue="Politica Intelligence Labs" className="bg-background" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <Input id="timezone" defaultValue="Asia/Kolkata (IST +5:30)" className="bg-background" />
-                </div>
-                <Separator className="bg-border" />
-                <SettingRow label="Dark Mode" description="Always use dark interface">
-                  <Switch checked={darkMode} onCheckedChange={setDarkMode} />
-                </SettingRow>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Languages className="size-4 text-primary" />
-                  <CardTitle className="text-base">Language & Region</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Separator className="bg-border mb-3" />
-                <SettingRow label="Multi-language Support" description="Enable Hindi, Bengali, Telugu, Tamil NLP">
-                  <Switch checked={multiLang} onCheckedChange={setMultiLang} />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <SettingRow label="Transliteration" description="Auto-convert Hinglish to Hindi">
-                  <Switch defaultChecked />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <SettingRow label="English UI" description="Interface language">
-                  <Switch defaultChecked />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <div className="mt-4 flex flex-col gap-1.5">
-                  <Label htmlFor="default-lang">Default Analysis Language</Label>
-                  <Input id="default-lang" defaultValue="Hindi" className="bg-background" />
-                </div>
-              </CardContent>
-            </Card>
+        {/* ─── General Settings Tab ─────────────────────────────────────────── */}
+        <TabsContent value="general" className="mt-6 space-y-6">
+          <div className="flex justify-end">
+            <Button onClick={handleSave} disabled={saving || saved}>
+              {saving ? (
+                <>
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                  Saving...
+                </>
+              ) : saved ? (
+                <>
+                  <CheckCircle className="size-3.5 mr-1.5" />
+                  Saved
+                </>
+              ) : (
+                <>
+                  <Save className="size-3.5 mr-1.5" />
+                  Save Changes
+                </>
+              )}
+            </Button>
           </div>
-        </TabsContent>
 
-        <TabsContent value="notifications" className="mt-4">
+          {/* LLM Provider Section */}
           <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <Bell className="size-4 text-primary" />
-                <CardTitle className="text-base">Notification Preferences</CardTitle>
-              </div>
-              <CardDescription>Control how and when you receive alerts</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {[
-                { label: "Email Notifications", description: "Receive alerts via email", state: notifEmail, setter: setNotifEmail },
-                { label: "Slack Integration", description: "Push alerts to Slack channels", state: notifSlack, setter: setNotifSlack },
-                { label: "New Document Alerts", description: "When a new document is processed", state: true, setter: () => {} },
-                { label: "Failed Processing Alerts", description: "When document processing fails", state: true, setter: () => {} },
-                { label: "Low Confidence Flags", description: "NLP confidence score drops below 0.7", state: false, setter: () => {} },
-                { label: "Daily Digest", description: "Summary email at 9:00 AM IST", state: true, setter: () => {} },
-              ].map((item, i) => (
-                <div key={i}>
-                  <SettingRow label={item.label} description={item.description}>
-                    <Switch checked={item.state} onCheckedChange={item.setter} />
-                  </SettingRow>
-                  {i < 5 && <Separator className="bg-border" />}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="processing" className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
+            <CardHeader>
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Cpu className="size-4 text-primary" />
-                  <CardTitle className="text-base">NLP Pipeline</CardTitle>
+                  <Brain className="size-4 text-primary" />
+                  <CardTitle className="text-base">LLM Provider</CardTitle>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <SettingRow label="Auto-Process Documents" description="Process new documents immediately">
-                  <Switch checked={autoProcess} onCheckedChange={setAutoProcess} />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <SettingRow label="NLP Enrichment" description="Extract entities, topics, sentiment">
-                  <Switch checked={nlpEnabled} onCheckedChange={setNlpEnabled} />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <SettingRow label="Promise Detection" description="Auto-extract political promises">
-                  <Switch defaultChecked />
-                </SettingRow>
-                <Separator className="bg-border my-2" />
-                <SettingRow label="Summarisation" description="Generate AI summaries automatically">
-                  <Switch defaultChecked />
-                </SettingRow>
-                <Separator className="bg-border mt-2 mb-4" />
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="min-confidence">Min. Confidence Threshold</Label>
-                  <Input id="min-confidence" defaultValue="0.75" className="bg-background" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <div className="flex items-center gap-2">
-                  <Database className="size-4 text-primary" />
-                  <CardTitle className="text-base">Storage & Retention</CardTitle>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {[
-                  { label: "Archive After 90 Days", description: "Move old docs to cold storage" },
-                  { label: "Delete Failed Jobs", description: "Remove failed tasks after 7 days" },
-                  { label: "Compress Media", description: "Auto-compress uploaded images" },
-                  { label: "Backup Daily", description: "Automated daily database backup" },
-                ].map((item, i) => (
-                  <div key={i}>
-                    <SettingRow label={item.label} description={item.description}>
-                      <Switch defaultChecked={i < 2} />
-                    </SettingRow>
-                    {i < 3 && <Separator className="bg-border my-2" />}
-                  </div>
-                ))}
-                <Separator className="bg-border mt-2 mb-4" />
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="retention">Data Retention Period (days)</Label>
-                  <Input id="retention" defaultValue="365" className="bg-background" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="security" className="mt-4">
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <div className="flex items-center gap-2">
-                <Shield className="size-4 text-primary" />
-                <CardTitle className="text-base">Security & Access</CardTitle>
+                <Button variant="ghost" size="sm" onClick={fetchLLMInfo} disabled={llmLoading}>
+                  <RefreshCw className={`size-3.5 mr-1.5 ${llmLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
               </div>
+              <CardDescription>Unified LLM via LiteLLM — configure via environment variables</CardDescription>
             </CardHeader>
-            <CardContent>
-              <SettingRow label="Two-Factor Authentication" description="Require 2FA for all admin users">
-                <Switch checked={twoFactor} onCheckedChange={setTwoFactor} />
-              </SettingRow>
-              <Separator className="bg-border my-2" />
-              <SettingRow label="Session Timeout" description="Auto-logout after 30 minutes of inactivity">
-                <Switch defaultChecked />
-              </SettingRow>
-              <Separator className="bg-border my-2" />
-              <SettingRow label="IP Allowlist" description="Restrict access to specific IP ranges">
-                <Switch />
-              </SettingRow>
-              <Separator className="bg-border my-2" />
-              <SettingRow label="Audit Log" description="Record all admin actions">
-                <Switch defaultChecked />
-              </SettingRow>
-              <Separator className="bg-border mt-2 mb-4" />
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <Label>Change Admin Password</Label>
-                  <Input type="password" placeholder="New password" className="bg-background" />
+            <CardContent className="flex flex-col gap-4">
+              {llmLoading ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading LLM info...
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <Input type="password" placeholder="Confirm new password" className="bg-background" />
-                </div>
-                <Button variant="outline" size="sm" className="w-fit">Update Password</Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="api" className="mt-4">
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">API Configuration</CardTitle>
-              <CardDescription>Manage service integrations and API keys</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col gap-4">
-                {[
-                  { service: "OpenAI API", key: "sk-proj-••••••••••••••••••••••••eF3a", status: "active" },
-                  { service: "Hugging Face", key: "hf_••••••••••••••••••••••••QwRt", status: "active" },
-                  { service: "Google Maps API", key: "AIza••••••••••••••••••••••••mN8x", status: "active" },
-                  { service: "Twitter/X API v2", key: "AAAA••••••••••••••••••••••••Bp9k", status: "inactive" },
-                  { service: "Telegram Bot API", key: "6547••••••••••••••••••••••••xPq2", status: "active" },
-                ].map((api, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-background border border-border">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{api.service}</p>
-                      <p className="text-xs font-mono text-muted-foreground mt-0.5">{api.key}</p>
+              ) : llmInfo ? (
+                <>
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 border border-border/50">
+                    <div className="flex flex-col gap-1 flex-1">
+                      <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Active Configuration</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {llmInfo?.current_provider ? (
+                          <>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs capitalize ${providerColors[llmInfo.current_provider] || ""}`}
+                            >
+                              {llmInfo.current_provider}
+                            </Badge>
+                            <span className="text-sm font-mono text-foreground">{llmInfo.current_model}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Loading configuration...</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${api.status === "active" ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" : "bg-muted text-muted-foreground border-border"}`}>
-                        {api.status}
-                      </span>
-                      <Button variant="outline" size="sm" className="h-7 text-xs">
-                        <RefreshCw className="size-3 mr-1" />
-                        Rotate
+                    <div className="flex flex-col items-end gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleTestLLM}
+                        disabled={llmStatus === "testing"}
+                        className="h-7 text-xs"
+                      >
+                        {llmStatus === "testing" ? (
+                          <><Loader2 className="size-3 mr-1.5 animate-spin" />Testing...</>
+                        ) : (
+                          "Test LLM"
+                        )}
                       </Button>
+                      {llmStatus === "ok" && (
+                        <span className="flex items-center gap-1 text-xs text-green-600">
+                          <Wifi className="size-3" /> Online
+                        </span>
+                      )}
+                      {llmStatus === "error" && (
+                        <span className="flex items-center gap-1 text-xs text-destructive">
+                          <WifiOff className="size-3" /> Offline
+                        </span>
+                      )}
                     </div>
                   </div>
-                ))}
+
+                  {llmTestResponse && (
+                    <p className={`text-xs px-3 py-2 rounded border ${llmStatus === "ok" ? "bg-green-500/5 border-green-500/20 text-green-700" : "bg-destructive/5 border-destructive/20 text-destructive"}`}>
+                      {llmStatus === "ok" ? `Response: "${llmTestResponse}"` : `Error: ${llmTestResponse}`}
+                    </p>
+                  )}
+
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-2">Available Models</p>
+                    <div className="flex flex-col gap-1.5">
+                      {llmInfo && llmInfo.models && llmInfo.models.length > 0 ? (
+                        llmInfo.models.map((m) => (
+                          <div
+                            key={m.id}
+                            className={`flex items-center justify-between px-3 py-2 rounded-lg border text-sm
+                              ${m.id === llmInfo.current_model ? "border-primary/30 bg-primary/5" : "border-border/50 bg-muted/20"}`}
+                          >
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-foreground">{m.name}</span>
+                                {m.id === llmInfo.current_model && (
+                                  <Badge variant="outline" className="text-xs h-4 px-1.5 border-primary/40 text-primary">active</Badge>
+                                )}
+                              </div>
+                              <span className="text-xs text-muted-foreground">{m.description}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className={`size-2 rounded-full ${m.available ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                              <span className={`text-xs ${m.available ? "text-green-600" : "text-muted-foreground"}`}>
+                                {m.available ? "Available" : "Offline"}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-muted-foreground">No models available</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Switch providers by setting <code className="bg-muted px-1 rounded text-xs">LLM_PROVIDER</code> and{" "}
+                    <code className="bg-muted px-1 rounded text-xs">LLM_MODEL</code> environment variables and restarting the API.
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Failed to load LLM info. Is the API running?</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {Object.keys(settings).length === 0 ? (
+            <Card className="bg-card border-border">
+              <CardContent className="py-12 text-center">
+                <SettingsIcon className="size-8 mx-auto mb-3 text-muted-foreground opacity-30" />
+                <p className="text-sm text-muted-foreground">No settings configured yet.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-6">
+              {Object.entries(settings).map(([category, categorySettings]: [string, any]) => {
+                const Icon = categoryIcons[category as keyof typeof categoryIcons] || SettingsIcon
+                return (
+                  <Card key={category} className="bg-card border-border">
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <Icon className="size-4 text-primary" />
+                        <CardTitle className="text-base capitalize">{category}</CardTitle>
+                      </div>
+                      <CardDescription>Manage {category} configuration</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-col gap-4">
+                        {Object.entries(categorySettings).map(([key, setting]: [string, any]) => {
+                          const isBool = typeof setting.value === "boolean"
+                          const isNumber = typeof setting.value === "number"
+
+                          return (
+                            <div key={key} className="flex items-center justify-between gap-4 py-2 border-b border-border/50 last:border-0">
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-foreground capitalize">{key.replace(/_/g, " ")}</p>
+                                {setting.description && (
+                                  <p className="text-xs text-muted-foreground mt-0.5">{setting.description}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {isBool ? (
+                                  <Switch
+                                    checked={setting.value}
+                                    onCheckedChange={(checked) => updateValue(category, key, checked)}
+                                  />
+                                ) : isNumber ? (
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={setting.value}
+                                    onChange={(e) => updateValue(category, key, parseFloat(e.target.value))}
+                                    className="w-24 h-8 text-sm"
+                                  />
+                                ) : (
+                                  <Input
+                                    value={setting.value}
+                                    onChange={(e) => updateValue(category, key, e.target.value)}
+                                    className="w-64 h-8 text-sm"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── API Tokens Tab ─────────────────────────────────────────── */}
+        <TabsContent value="tokens" className="mt-6 space-y-6">
+          <div className="flex justify-end">
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              <DialogTrigger render={<Button />}>
+                <Plus className="size-4 mr-2" />
+                Generate New Token
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Generate API Token</DialogTitle>
+                  <DialogDescription>
+                    Create a new token for authenticating browser extensions or external services.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="token-name">Name</Label>
+                    <Input
+                      id="token-name"
+                      placeholder="e.g. Chrome Extension - Production"
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="token-desc">Description (optional)</Label>
+                    <Textarea
+                      id="token-desc"
+                      placeholder="What is this token used for?"
+                      value={formDescription}
+                      onChange={(e) => setFormDescription(e.target.value)}
+                      rows={2}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="token-expiry">Expires in (days, optional)</Label>
+                    <Input
+                      id="token-expiry"
+                      type="number"
+                      placeholder="Leave empty for no expiration"
+                      value={formExpiry}
+                      onChange={(e) => setFormExpiry(e.target.value)}
+                      min={1}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleGenerate} disabled={!formName.trim() || generating}>
+                    {generating && <Loader2 className="size-4 mr-2 animate-spin" />}
+                    Generate Token
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+
+          {/* Token reveal dialog */}
+          <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <AlertTriangle className="size-5 text-amber-500" />
+                  Token Generated
+                </DialogTitle>
+                <DialogDescription>
+                  Copy this token now. It will not be shown again.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                <div className="flex items-center gap-2">
+                  <Input
+                    readOnly
+                    value={newRawToken}
+                    className="font-mono text-sm"
+                  />
+                  <Button size="icon" variant="outline" onClick={handleCopy}>
+                    {copied ? <Check className="size-4 text-green-600" /> : <Copy className="size-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Store this token securely. You will need to paste it into your browser extension settings.
+                </p>
               </div>
+              <DialogFooter>
+                <Button onClick={() => setShowTokenDialog(false)}>Done</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Tokens table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="size-5" />
+                Active Tokens
+              </CardTitle>
+              <CardDescription>
+                Tokens authenticate browser extensions connecting to the ingestion API
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {tokensLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : tokens.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Key className="size-10 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">No API tokens yet</p>
+                  <p className="text-sm mt-1">Generate a token to connect your browser extension</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Token</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
+                      <TableHead>Last Used</TableHead>
+                      <TableHead>Expires</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {tokens.map((token) => (
+                      <TableRow key={token.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium text-sm">{token.name}</p>
+                            {token.description && (
+                              <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                                {token.description}
+                              </p>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                            {token.token_prefix}
+                          </code>
+                        </TableCell>
+                        <TableCell>{getStatusBadge(token)}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDate(token.created_at)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDate(token.last_used_at)}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {token.expires_at ? formatDate(token.expires_at) : "Never"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Switch
+                              checked={token.is_active}
+                              onCheckedChange={() => handleToggleActive(token)}
+                            />
+                            {deleteConfirmId === token.id ? (
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => handleDeleteToken(token.id)}
+                                >
+                                  Confirm
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setDeleteConfirmId(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => setDeleteConfirmId(token.id)}
+                              >
+                                <Trash2 className="size-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

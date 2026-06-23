@@ -1,53 +1,69 @@
 "use client"
 
 import React, { createContext, useContext, useState, useEffect } from "react"
-import { ADMIN_USER } from "@/lib/mock-data"
+import { getToken, clearToken, isAuthenticated as checkToken } from "@/lib/api-client"
 
 interface AuthContextType {
   isAuthenticated: boolean
+  isLoading: boolean
   username: string | null
-  login: (username: string, password: string) => boolean
   logout: () => void
+  refreshAuth: () => void
 }
 
 const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
+  isLoading: true,
   username: null,
-  login: () => false,
   logout: () => {},
+  refreshAuth: () => {},
 })
+
+function parseTokenUsername(token: string): string | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]))
+    return payload.sub || payload.username || null
+  } catch {
+    return null
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [username, setUsername] = useState<string | null>(null)
 
-  useEffect(() => {
-    const stored = sessionStorage.getItem("politica_auth")
-    if (stored) {
-      const { user } = JSON.parse(stored)
-      setIsAuthenticated(true)
-      setUsername(user)
+  const checkAuthStatus = () => {
+    const token = getToken()
+    const hasToken = !!token
+    setIsAuthenticated(hasToken)
+    if (hasToken && token) {
+      setUsername(parseTokenUsername(token) || "Admin")
+    } else {
+      setUsername(null)
     }
-  }, [])
-
-  const login = (user: string, pass: string): boolean => {
-    if (user === ADMIN_USER.username && pass === ADMIN_USER.password) {
-      setIsAuthenticated(true)
-      setUsername(user)
-      sessionStorage.setItem("politica_auth", JSON.stringify({ user }))
-      return true
-    }
-    return false
+    setIsLoading(false)
   }
 
+  useEffect(() => {
+    checkAuthStatus()
+  }, [])
+
   const logout = () => {
+    clearToken()
     setIsAuthenticated(false)
     setUsername(null)
-    sessionStorage.removeItem("politica_auth")
+    if (typeof window !== "undefined") {
+      window.location.href = "/login"
+    }
+  }
+
+  const refreshAuth = () => {
+    checkAuthStatus()
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, username, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, username, logout, refreshAuth }}>
       {children}
     </AuthContext.Provider>
   )

@@ -1,143 +1,218 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Search, ImageIcon, FileText, Calendar, HardDrive, X } from "lucide-react"
-import { mediaItems } from "@/lib/mock-data"
+import { apiClient } from "@/lib/api-client"
+import { ImageIcon, Search, Loader2, ExternalLink, User } from "lucide-react"
 
-const PLATFORM_COLOR: Record<string, string> = {
-  x: "bg-foreground/10 text-foreground",
-  instagram: "bg-[var(--chart-5)]/10 text-[var(--chart-5)]",
-  telegram: "bg-[var(--chart-1)]/10 text-[var(--chart-1)]",
-  news: "bg-[var(--chart-4)]/10 text-[var(--chart-4)]",
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+function formatDate(iso: string | null): string {
+  if (!iso) return ""
+  try {
+    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+  } catch {
+    return ""
+  }
 }
-
-const TYPE_COLORS: Record<string, string> = {
-  banner: "bg-[var(--chart-1)]/10 text-[var(--chart-1)]",
-  poster: "bg-[var(--chart-5)]/10 text-[var(--chart-5)]",
-  event: "bg-[var(--chart-3)]/10 text-[var(--chart-3)]",
-  rally: "bg-[var(--chart-4)]/10 text-[var(--chart-4)]",
-}
-
-// Simple placeholder image colors per item
-const PLACEHOLDER_COLORS = [
-  "from-[oklch(0.2_0.05_264)] to-[oklch(0.15_0.02_264)]",
-  "from-[oklch(0.2_0.05_320)] to-[oklch(0.15_0.02_320)]",
-  "from-[oklch(0.2_0.05_145)] to-[oklch(0.15_0.02_145)]",
-  "from-[oklch(0.2_0.05_80)] to-[oklch(0.15_0.02_80)]",
-  "from-[oklch(0.2_0.05_264)] to-[oklch(0.15_0.02_180)]",
-  "from-[oklch(0.2_0.05_320)] to-[oklch(0.15_0.02_264)]",
-]
 
 export default function MediaPage() {
+  const [mediaItems, setMediaItems] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [filterType, setFilterType] = useState("all")
-  const [selected, setSelected] = useState<typeof mediaItems[0] | null>(null)
+  const [selectedItem, setSelectedItem] = useState<any | null>(null)
 
-  const filtered = mediaItems.filter((m) => {
-    const matchSearch = m.filename.toLowerCase().includes(search.toLowerCase()) || m.ocrText.toLowerCase().includes(search.toLowerCase()) || m.entities.some((e) => e.toLowerCase().includes(search.toLowerCase()))
-    const matchType = filterType === "all" || m.type === filterType
-    return matchSearch && matchType
-  })
+  useEffect(() => {
+    async function fetchMedia() {
+      try {
+        setLoading(true)
+        const data = await apiClient.getMediaGallery({ limit: 50 })
+        setMediaItems(data.items || [])
+      } catch (error) {
+        console.error("Failed to fetch media:", error)
+        setMediaItems([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchMedia()
+  }, [])
+
+  const filtered = mediaItems.filter((item) =>
+    item.title?.toLowerCase().includes(search.toLowerCase()) ||
+    item.content?.toLowerCase().includes(search.toLowerCase()) ||
+    item.author_handle?.toLowerCase().includes(search.toLowerCase())
+  )
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-52">
+      <div>
+        <h1 className="text-lg font-semibold text-foreground">Media Gallery</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Screenshots captured from collected posts — visual proof of collection
+        </p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by filename, OCR text, entity…" className="pl-8 h-9 bg-input border-border text-sm" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by title, content, or author…"
+            className="pl-8 h-9 bg-input border-border text-sm"
+          />
         </div>
-        {["all", "banner", "poster", "event", "rally"].map((t) => (
-          <Button key={t} size="sm" variant={filterType === t ? "default" : "outline"} className="h-8 text-xs capitalize" onClick={() => setFilterType(t)}>
-            {t}
-          </Button>
-        ))}
-        <span className="text-xs text-muted-foreground">{filtered.length} items</span>
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          {filtered.filter((i) => i.has_screenshot).length} with screenshot
+        </span>
       </div>
 
-      <div className="flex gap-4">
-        {/* Grid */}
-        <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-4">
-          {filtered.map((item, idx) => (
-            <Card
-              key={item.id}
-              className={`bg-card border-border cursor-pointer overflow-hidden transition-all hover:scale-[1.01] ${selected?.id === item.id ? "ring-2 ring-primary" : ""}`}
-              onClick={() => setSelected(selected?.id === item.id ? null : item)}
-            >
-              {/* Placeholder image */}
-              <div className={`h-36 bg-gradient-to-br ${PLACEHOLDER_COLORS[idx % PLACEHOLDER_COLORS.length]} flex flex-col items-center justify-center gap-2 relative`}>
-                <ImageIcon className="size-8 text-foreground/20" />
-                <span className="text-[10px] text-foreground/30 font-mono">{item.filename}</span>
-                <span className={`absolute top-2 right-2 text-[10px] font-medium px-2 py-0.5 rounded capitalize ${TYPE_COLORS[item.type]}`}>{item.type}</span>
-                <span className={`absolute top-2 left-2 text-[10px] font-medium px-2 py-0.5 rounded uppercase ${PLATFORM_COLOR[item.platform]}`}>{item.platform}</span>
-              </div>
-              <CardContent className="p-3 flex flex-col gap-2">
-                <p className="text-xs font-medium text-foreground truncate">{item.filename}</p>
-                <p className="text-[10px] text-muted-foreground line-clamp-2 leading-relaxed">{item.ocrText}</p>
-                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span>{item.size}</span>
-                  <span>{new Date(item.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</span>
+      {filtered.length === 0 ? (
+        <Card className="border-border bg-card">
+          <CardContent className="p-12 text-center">
+            <ImageIcon className="size-12 mx-auto mb-4 text-muted-foreground/30" />
+            <h3 className="text-lg font-semibold text-foreground mb-2">
+              {mediaItems.length === 0 ? "No Media Yet" : "No Results"}
+            </h3>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              {mediaItems.length === 0
+                ? "Use the browser extension to collect posts — screenshots will appear here automatically."
+                : "No media items match your search."}
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {filtered.map((item) => (
+              <Card
+                key={item.id}
+                onClick={() => setSelectedItem(item)}
+                className="bg-card border-border hover:border-primary/30 transition-colors overflow-hidden cursor-pointer group"
+              >
+                <div className="h-40 bg-gradient-to-br from-muted to-muted-foreground/10 flex items-center justify-center relative overflow-hidden">
+                  {item.screenshot_url ? (
+                    <img
+                      src={`${API_BASE}${item.screenshot_url}`}
+                      alt={item.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      onError={(e) => {
+                        const target = e.currentTarget
+                        target.style.display = "none"
+                        target.nextElementSibling?.classList.remove("hidden")
+                      }}
+                    />
+                  ) : null}
+                  <ImageIcon className={`size-8 text-muted-foreground/30 ${item.screenshot_url ? "hidden" : ""}`} />
+                  <Badge
+                    variant="secondary"
+                    className="absolute top-2 left-2 text-[10px] capitalize"
+                  >
+                    {item.platform}
+                  </Badge>
+                  {item.url && (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute top-2 right-2 bg-black/50 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <ExternalLink className="size-3 text-white" />
+                    </a>
+                  )}
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {/* Detail panel */}
-        {selected && (
-          <Card className="w-72 shrink-0 bg-card border-border">
-            <CardContent className="p-0 flex flex-col">
-              {/* Preview */}
-              <div className={`h-48 bg-gradient-to-br ${PLACEHOLDER_COLORS[mediaItems.indexOf(selected) % PLACEHOLDER_COLORS.length]} flex flex-col items-center justify-center gap-2 rounded-t-lg`}>
-                <ImageIcon className="size-10 text-foreground/20" />
-                <span className="text-xs text-foreground/30 font-mono px-2 text-center">{selected.filename}</span>
-              </div>
-              <div className="p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-foreground">Details</span>
-                  <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-foreground"><X className="size-4" /></button>
-                </div>
-                <div className="flex flex-col gap-2 text-xs">
-                  {[
-                    { icon: FileText, label: "File", value: selected.filename },
-                    { icon: Calendar, label: "Date", value: new Date(selected.date).toLocaleDateString("en-IN") },
-                    { icon: HardDrive, label: "Size", value: selected.size },
-                  ].map(({ icon: Icon, label, value }) => (
-                    <div key={label} className="flex items-start gap-2">
-                      <Icon className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
-                        <p className="text-foreground font-medium">{value}</p>
-                      </div>
+                <CardContent className="p-3 flex flex-col gap-1.5">
+                  <p className="text-xs font-medium text-foreground truncate">{item.title}</p>
+                  {item.author_handle && (
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <User className="size-2.5" />
+                      <span className="truncate">@{item.author_handle}</span>
                     </div>
-                  ))}
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">OCR Text</p>
-                  <p className="text-xs text-foreground bg-muted/40 rounded-lg p-2.5 leading-relaxed">{selected.ocrText}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Entities</p>
-                  <div className="flex flex-wrap gap-1">
-                    {selected.entities.map((e) => <Badge key={e} variant="outline" className="text-[10px] border-border">{e}</Badge>)}
+                  )}
+                  {item.published_at && (
+                    <p className="text-[10px] text-muted-foreground">{formatDate(item.published_at)}</p>
+                  )}
+                  {item.topics && item.topics.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.topics.slice(0, 2).map((topic: string) => (
+                        <Badge key={topic} variant="outline" className="text-[9px] h-4">
+                          {topic}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Lightbox */}
+          {selectedItem && (
+            <div
+              className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+              onClick={() => setSelectedItem(null)}
+            >
+              <div
+                className="bg-card rounded-lg overflow-hidden max-w-2xl w-full max-h-[90vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {selectedItem.screenshot_url ? (
+                  <img
+                    src={`${API_BASE}${selectedItem.screenshot_url}`}
+                    alt={selectedItem.title}
+                    className="w-full object-contain max-h-[60vh]"
+                  />
+                ) : (
+                  <div className="h-48 bg-muted flex items-center justify-center">
+                    <ImageIcon className="size-12 text-muted-foreground/30" />
                   </div>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1.5">Topics</p>
-                  <div className="flex flex-wrap gap-1">
-                    {selected.topics.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
+                )}
+                <div className="p-4 flex flex-col gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{selectedItem.title}</p>
+                    <Badge variant="secondary" className="text-[10px] capitalize shrink-0">
+                      {selectedItem.platform}
+                    </Badge>
                   </div>
+                  {selectedItem.author_handle && (
+                    <p className="text-xs text-muted-foreground">@{selectedItem.author_handle}</p>
+                  )}
+                  {selectedItem.published_at && (
+                    <p className="text-xs text-muted-foreground">{formatDate(selectedItem.published_at)}</p>
+                  )}
+                  {selectedItem.content && (
+                    <p className="text-xs text-muted-foreground line-clamp-3">{selectedItem.content}</p>
+                  )}
+                  {selectedItem.url && (
+                    <a
+                      href={selectedItem.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary hover:underline flex items-center gap-1 w-fit"
+                    >
+                      <ExternalLink className="size-3" /> Open original post
+                    </a>
+                  )}
                 </div>
-                <Button size="sm" className="h-8 text-xs mt-1">Download Original</Button>
               </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }
+

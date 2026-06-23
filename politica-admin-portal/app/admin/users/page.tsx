@@ -1,121 +1,208 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Search, Plus, Shield, Eye, Edit, Trash2, MoreHorizontal } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { apiClient } from "@/lib/api-client"
+import { Search, Plus, Users as UsersIcon, UserCheck, UserX, UserMinus, Mail, Shield, Calendar, Loader2, Trash2 } from "lucide-react"
 
-const mockUsers = [
-  { id: 1, name: "Arjun Mehta", username: "admin", email: "arjun@politica.in", role: "Super Admin", status: "active", lastLogin: "2026-06-21T10:15:00Z", createdAt: "2025-01-15", permissions: ["read", "write", "delete", "admin"] },
-  { id: 2, name: "Priya Sharma", username: "priya_s", email: "priya@politica.in", role: "Analyst", status: "active", lastLogin: "2026-06-21T08:30:00Z", createdAt: "2025-03-22", permissions: ["read", "write"] },
-  { id: 3, name: "Vikram Nair", username: "vikram_n", email: "vikram@politica.in", role: "Researcher", status: "active", lastLogin: "2026-06-20T16:45:00Z", createdAt: "2025-04-10", permissions: ["read"] },
-  { id: 4, name: "Kavya Reddy", username: "kavya_r", email: "kavya@politica.in", role: "Editor", status: "inactive", lastLogin: "2026-06-15T12:00:00Z", createdAt: "2025-05-01", permissions: ["read", "write"] },
-  { id: 5, name: "Rajan Patel", username: "rajan_p", email: "rajan@politica.in", role: "Viewer", status: "active", lastLogin: "2026-06-21T09:00:00Z", createdAt: "2025-06-12", permissions: ["read"] },
-  { id: 6, name: "Sunita Joshi", username: "sunita_j", email: "sunita@politica.in", role: "Analyst", status: "suspended", lastLogin: "2026-06-01T11:20:00Z", createdAt: "2025-02-28", permissions: ["read", "write"] },
-]
+const ROLES = ["Admin", "Editor", "Analyst", "Viewer"]
+const PERMISSIONS = ["read", "write", "delete", "admin"]
 
-const roleColors: Record<string, string> = {
-  "Super Admin": "bg-primary/15 text-primary border-primary/20",
-  "Analyst": "bg-blue-500/15 text-blue-400 border-blue-500/20",
-  "Researcher": "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  "Editor": "bg-amber-500/15 text-amber-400 border-amber-500/20",
-  "Viewer": "bg-muted text-muted-foreground border-border",
-}
-
-const statusColors: Record<string, string> = {
-  active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  inactive: "bg-muted text-muted-foreground border-border",
-  suspended: "bg-destructive/15 text-destructive border-destructive/20",
-}
-
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
-  const h = Math.floor(diff / 3600000)
-  if (h < 1) return "Just now"
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
+const statusConfig = {
+  active: { icon: UserCheck, color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/20", badge: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
+  inactive: { icon: UserMinus, color: "text-muted-foreground", bg: "bg-muted/20 border-border", badge: "bg-muted text-muted-foreground border-border" },
+  suspended: { icon: UserX, color: "text-destructive", bg: "bg-destructive/10 border-destructive/20", badge: "bg-destructive/15 text-destructive border-destructive/20" },
 }
 
 export default function UsersPage() {
+  const [users, setUsers] = useState<any[]>([])
+  const [stats, setStats] = useState<any>({})
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const filtered = mockUsers.filter(u =>
-    u.name.toLowerCase().includes(search.toLowerCase()) ||
-    u.username.toLowerCase().includes(search.toLowerCase()) ||
-    u.role.toLowerCase().includes(search.toLowerCase())
-  )
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [newUser, setNewUser] = useState({ name: "", username: "", email: "", role: "Viewer" })
+
+  async function fetchUsers() {
+    try {
+      setLoading(true)
+      const [usersData, statsData] = await Promise.all([
+        apiClient.getUsers({ limit: 100, status: statusFilter === "all" ? undefined : statusFilter }),
+        apiClient.getUserStats()
+      ])
+      setUsers(usersData || [])
+      setStats(statsData || {})
+    } catch (error) {
+      console.error("Failed to fetch users:", error)
+      setUsers([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchUsers()
+  }, [statusFilter])
+
+  async function handleCreate() {
+    if (!newUser.name || !newUser.username || !newUser.email) {
+      alert("Please fill all required fields")
+      return
+    }
+    try {
+      await apiClient.createUser({
+        name: newUser.name,
+        username: newUser.username,
+        email: newUser.email,
+        role: newUser.role,
+        permissions: ["read"]
+      })
+      setIsDialogOpen(false)
+      setNewUser({ name: "", username: "", email: "", role: "Viewer" })
+      fetchUsers()
+    } catch (error) {
+      console.error("Failed to create user:", error)
+      alert("Failed to create user")
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Are you sure you want to delete this user?")) return
+    try {
+      await apiClient.deleteUser(id)
+      fetchUsers()
+    } catch (error) {
+      console.error("Failed to delete user:", error)
+    }
+  }
+
+  async function handleStatusToggle(user: any) {
+    try {
+      const newStatus = user.status === "active" ? "inactive" : "active"
+      await apiClient.updateUser(user.id, { status: newStatus })
+      fetchUsers()
+    } catch (error) {
+      console.error("Failed to update user:", error)
+    }
+  }
+
+  const filtered = users.filter(user => {
+    const matchSearch = user.name?.toLowerCase().includes(search.toLowerCase()) ||
+      user.username?.toLowerCase().includes(search.toLowerCase()) ||
+      user.email?.toLowerCase().includes(search.toLowerCase())
+    return matchSearch
+  })
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">User Management</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage admin users, roles and permissions</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Manage user accounts, roles, and permissions</p>
         </div>
-        <Dialog>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus data-icon="inline-start" />
+            <Button>
+              <Plus className="size-3.5 mr-1.5" />
               Add User
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-card border-border">
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add New User</DialogTitle>
+              <DialogTitle>Create New User</DialogTitle>
             </DialogHeader>
-            <div className="flex flex-col gap-4 py-2">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="name">Full Name</Label>
-                <Input id="name" placeholder="e.g. Priya Sharma" className="bg-background" />
+            <div className="flex flex-col gap-4 mt-4">
+              <div>
+                <label className="text-sm font-medium text-foreground">Full Name</label>
+                <Input
+                  value={newUser.name}
+                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                  placeholder="John Doe"
+                  className="mt-1.5"
+                />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="priya@politica.in" className="bg-background" />
+              <div>
+                <label className="text-sm font-medium text-foreground">Username</label>
+                <Input
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                  placeholder="johndoe"
+                  className="mt-1.5"
+                />
               </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="username">Username</Label>
-                <Input id="username" placeholder="priya_s" className="bg-background" />
+              <div>
+                <label className="text-sm font-medium text-foreground">Email</label>
+                <Input
+                  type="email"
+                  value={newUser.email}
+                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                  placeholder="john@example.com"
+                  className="mt-1.5"
+                />
               </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm">Cancel</Button>
-                <Button size="sm">Create User</Button>
+              <div>
+                <label className="text-sm font-medium text-foreground">Role</label>
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  className="w-full mt-1.5 h-9 px-3 rounded-md border border-border bg-background text-sm"
+                >
+                  {ROLES.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
               </div>
+              <Button onClick={handleCreate} className="mt-2">
+                Create User
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: "Total Users", value: mockUsers.length, sub: "registered" },
-          { label: "Active", value: mockUsers.filter(u => u.status === "active").length, sub: "currently active" },
-          { label: "Inactive", value: mockUsers.filter(u => u.status === "inactive").length, sub: "no recent activity" },
-          { label: "Suspended", value: mockUsers.filter(u => u.status === "suspended").length, sub: "access revoked" },
-        ].map((s) => (
-          <Card key={s.label} className="bg-card border-border">
-            <CardContent className="pt-4 pb-4">
-              <p className="text-xs text-muted-foreground">{s.label}</p>
-              <p className="text-2xl font-bold text-foreground mt-1">{s.value}</p>
-              <p className="text-xs text-muted-foreground">{s.sub}</p>
-            </CardContent>
-          </Card>
-        ))}
+        {(["total", "active", "inactive", "suspended"] as const).map(status => {
+          const count = stats[status] || 0
+          const cfg = status === "total" ? null : statusConfig[status]
+          const Icon = cfg?.icon || UsersIcon
+          return (
+            <Card
+              key={status}
+              className={`bg-card border-border cursor-pointer transition-colors ${statusFilter === status ? "border-primary/40 bg-primary/5" : "hover:bg-accent/30"}`}
+              onClick={() => setStatusFilter(statusFilter === status ? "all" : status)}
+            >
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Icon className={`size-4 ${cfg?.color || "text-primary"}`} />
+                  <p className="text-xs text-muted-foreground capitalize">{status}</p>
+                </div>
+                <p className="text-2xl font-bold text-foreground">{count}</p>
+              </CardContent>
+            </Card>
+          )
+        })}
       </div>
 
       <Card className="bg-card border-border">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <CardTitle className="text-base">All Users</CardTitle>
-              <CardDescription>{filtered.length} users found</CardDescription>
+              <CardDescription>{filtered.length} of {users.length} users</CardDescription>
             </div>
-            <div className="relative w-60">
+            <div className="relative w-64">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search users..."
@@ -127,41 +214,65 @@ export default function UsersPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col gap-2">
-            {filtered.map((user) => (
-              <div key={user.id} className="flex items-center gap-4 p-3 rounded-lg border border-border bg-background/50 hover:bg-accent/40 transition-colors">
-                <Avatar className="size-9 shrink-0">
-                  <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
-                    {user.name.split(" ").map(n => n[0]).join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground">{user.name}</span>
-                    {user.role === "Super Admin" && <Shield className="size-3 text-primary" />}
-                  </div>
-                  <p className="text-xs text-muted-foreground">@{user.username} · {user.email}</p>
-                </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${roleColors[user.role]}`}>{user.role}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${statusColors[user.status]}`}>{user.status}</span>
-                  <span className="text-xs text-muted-foreground hidden md:block w-20 text-right">Last: {timeAgo(user.lastLogin)}</span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="size-7 p-0">
-                        <MoreHorizontal className="size-3.5" />
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <UsersIcon className="size-8 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">{users.length === 0 ? "No users yet. Create your first user above." : "No users match your search."}</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {filtered.map(user => {
+                const cfg = statusConfig[user.status as keyof typeof statusConfig] || statusConfig.active
+                const Icon = cfg.icon
+                return (
+                  <div key={user.id} className={`flex items-center justify-between gap-4 p-3 rounded-lg border transition-colors ${cfg.bg}`}>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <Icon className={`size-4 shrink-0 ${cfg.color}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-medium text-foreground">{user.name}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${cfg.badge}`}>{user.status}</span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          <span className="text-xs text-muted-foreground">@{user.username}</span>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Mail className="size-3" />
+                            {user.email}
+                          </span>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Shield className="size-3" />
+                            {user.role}
+                          </span>
+                          {user.last_login && (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Calendar className="size-3" />
+                              Last login: {new Date(user.last_login).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleStatusToggle(user)}
+                      >
+                        {user.status === "active" ? "Deactivate" : "Activate"}
                       </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-popover border-border">
-                      <DropdownMenuItem onSelect={() => {}}><Eye className="size-3.5 mr-2" />View Profile</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => {}}><Edit className="size-3.5 mr-2" />Edit User</DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => {}} className="text-destructive focus:text-destructive"><Trash2 className="size-3.5 mr-2" />Remove</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            ))}
-          </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDelete(user.id)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -6,23 +6,19 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard,
   FileText,
-  Tag,
-  BookMarked,
-  Users,
   BarChart3,
-  Search,
-  MapPin,
   ImageIcon,
   MessageSquare,
   FolderOpen,
   Settings,
   Shield,
-  ScrollText,
   Activity,
   ChevronRight,
   UserCog,
   PanelLeftClose,
   PanelLeftOpen,
+  Radio,
+  Brain,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -47,32 +43,33 @@ const navGroups = [
     label: "Intelligence",
     items: [
       { title: "Documents",  href: "/admin/documents", icon: FileText },
-      { title: "Topics",     href: "/admin/topics",    icon: Tag },
-      { title: "Promises",   href: "/admin/promises",  icon: BookMarked },
-      { title: "Entities",   href: "/admin/entities",  icon: Users },
-      { title: "Summaries",  href: "/admin/summaries", icon: ScrollText },
     ],
   },
   {
     label: "Discover",
     items: [
-      { title: "Search",        href: "/admin/search",     icon: Search },
-      { title: "Geographic",    href: "/admin/geographic", icon: MapPin },
-      { title: "Media Library", href: "/admin/media",      icon: ImageIcon },
+      { title: "Media Library", href: "/admin/media",  icon: ImageIcon },
     ],
   },
   {
     label: "Research",
     items: [
-      { title: "Assistant",  href: "/admin/research",   icon: MessageSquare },
-      { title: "Workspaces", href: "/admin/workspaces", icon: FolderOpen },
+      { title: "AI Assistant", href: "/admin/assistant",  icon: Brain },
+      { title: "Research",     href: "/admin/research",   icon: MessageSquare },
+    ],
+  },
+  {
+    label: "Pipeline",
+    items: [
+      { title: "Collection", href: "/admin/collection", icon: Radio },
+      { title: "AI Agents",  href: "/admin/agents",     icon: Brain },
     ],
   },
   {
     label: "System",
     items: [
-      { title: "Users",    href: "/admin/users",    icon: UserCog },
-      { title: "Settings", href: "/admin/settings", icon: Settings },
+      { title: "Users",      href: "/admin/users",            icon: UserCog },
+      { title: "Settings",   href: "/admin/settings",         icon: Settings },
     ],
   },
 ]
@@ -157,8 +154,8 @@ export function AdminSidebar() {
         </div>
 
         {/* ── Nav groups ── */}
-        <ScrollArea className="flex-1">
-          <nav className={cn("flex flex-col gap-4 py-3", collapsed ? "px-[10px]" : "px-2")}>
+        <ScrollArea className="flex-1 overflow-hidden">
+          <nav className={cn("flex flex-col gap-4 py-3 pb-4", collapsed ? "px-[10px]" : "px-2")}>
             {navGroups.map((group, gi) => (
               <div key={group.label} className="flex flex-col gap-0.5">
                 {!collapsed ? (

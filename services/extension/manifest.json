@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Politica Collector",
+  "version": "1.1.0",
+  "description": "Collect political content from social platforms and send to your Politica server",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.instagram.com/*",
+    "https://www.facebook.com/*",
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.instagram.com/*"],
+      "js": ["content/common.js", "content/instagram.js", "content/collector-manager.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.facebook.com/*"],
+      "js": ["content/common.js", "content/facebook.js", "content/collector-manager.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content/common.js", "content/twitter.js", "content/collector-manager.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Politica Collector",
+    "default_icon": {
+      "128": "icons/icon.svg"
+    }
+  },
+  "options_page": "options/options.html",
+  "icons": {
+    "128": "icons/icon.svg"
+  }
+}

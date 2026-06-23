@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Politica Collector</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+          <rect width="128" height="128" rx="20" fill="#3b82f6"/>
+          <text x="64" y="90" font-family="Arial" font-size="80" font-weight="bold"
+                text-anchor="middle" fill="white">P</text>
+        </svg>
+        <span class="logo-text">Politica</span>
+      </div>
+      <a href="#" id="settings-link" class="settings-icon" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </a>
+    </header>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <div class="status-item">
+        <span class="dot" id="api-dot"></span>
+        <span id="api-status-text">Checking...</span>
+      </div>
+      <div class="platform-badge" id="platform-badge">
+        <span id="platform-name">—</span>
+      </div>
+    </div>
+
+    <!-- Main Actions -->
+    <div class="actions" id="actions-area">
+      <button class="btn btn-primary" id="collect-page-btn" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="8 17 12 21 16 17"/>
+          <line x1="12" y1="12" x2="12" y2="21"/>
+          <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
+        </svg>
+        <span id="collect-page-label">Collect This Page</span>
+      </button>
+
+      <button class="btn btn-secondary" id="collect-post-btn" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="9" y1="21" x2="9" y2="9"/>
+        </svg>
+        Collect This Post
+      </button>
+
+      <button class="btn btn-collect-all" id="collect-all-btn" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="17 1 21 5 17 9"/>
+          <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+          <polyline points="7 23 3 19 7 15"/>
+          <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+        </svg>
+        <span id="collect-all-label">Collect All Posts</span>
+      </button>
+
+      <button class="btn btn-ai" id="ai-extract-btn" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+        </svg>
+        Try AI Extraction
+      </button>
+    </div>
+
+    <!-- Auto-Collect Panel -->
+    <div class="auto-collect-panel" id="auto-collect-panel" style="display:none">
+      <div class="auto-collect-header">
+        <span class="auto-collect-title">Auto-Collect</span>
+        <button class="btn-toggle" id="auto-collect-toggle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          <span id="auto-collect-toggle-label">Start</span>
+        </button>
+      </div>
+      <div class="auto-collect-options">
+        <label class="option-label">
+          Max posts:
+          <input type="number" id="auto-collect-max-posts" value="100" min="1" max="500" class="option-input">
+        </label>
+      </div>
+      <div class="auto-collect-status" id="auto-collect-status">
+        <div class="progress-row">
+          <span class="progress-label">Status:</span>
+          <span class="progress-value" id="ac-state">Idle</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Posts:</span>
+          <span class="progress-value" id="ac-posts">0</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Scrolls:</span>
+          <span class="progress-value" id="ac-scrolls">0</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Errors:</span>
+          <span class="progress-value" id="ac-errors">0</span>
+        </div>
+      </div>
+      <div class="auto-collect-bar">
+        <div class="auto-collect-progress" id="ac-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Deep Scrape Panel (Instagram) -->
+    <div class="deep-scrape-panel" id="deep-scrape-panel" style="display:none">
+      <div class="deep-scrape-header">
+        <span class="deep-scrape-title">Deep Scrape Profile</span>
+        <button class="btn-toggle" id="deep-scrape-toggle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          <span id="deep-scrape-toggle-label">Start</span>
+        </button>
+      </div>
+      <div class="deep-scrape-description">
+        Opens each post, expands all comments, and saves complete data.
+      </div>
+      <div class="deep-scrape-options">
+        <label class="option-label">
+          Max posts:
+          <input type="number" id="deep-scrape-max-posts" value="50" min="1" max="500" class="option-input">
+        </label>
+        <label class="option-label">
+          From date:
+          <input type="date" id="deep-scrape-from-date" class="option-input">
+        </label>
+        <label class="option-label">
+          To date:
+          <input type="date" id="deep-scrape-to-date" class="option-input">
+        </label>
+      </div>
+      <div class="deep-scrape-status" id="deep-scrape-status">
+        <div class="progress-row">
+          <span class="progress-label">Status:</span>
+          <span class="progress-value" id="ds-state">Idle</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Posts:</span>
+          <span class="progress-value" id="ds-posts">0</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Comments:</span>
+          <span class="progress-value" id="ds-comments">0</span>
+        </div>
+        <div class="progress-row">
+          <span class="progress-label">Errors:</span>
+          <span class="progress-value" id="ds-errors">0</span>
+        </div>
+        <div class="progress-row" id="ds-current-row" style="display:none">
+          <span class="progress-label">Current:</span>
+          <span class="progress-value ds-current-url" id="ds-current" title=""></span>
+        </div>
+        <div class="progress-row" id="ds-date-range-row" style="display:none">
+          <span class="progress-label">Date range:</span>
+          <span class="progress-value" id="ds-date-range"></span>
+        </div>
+        <div class="progress-row" id="ds-current-date-row" style="display:none">
+          <span class="progress-label">Post date:</span>
+          <span class="progress-value" id="ds-current-date"></span>
+        </div>
+      </div>
+      <div class="deep-scrape-bar">
+        <div class="deep-scrape-progress" id="ds-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Unsupported page message -->
+    <div class="unsupported" id="unsupported-msg" style="display:none">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <p>Navigate to Instagram, Facebook, or Twitter/X to start collecting.</p>
+    </div>
+
+    <!-- Spinner -->
+    <div class="spinner-wrap" id="spinner" style="display:none">
+      <div class="spinner"></div>
+      <span id="spinner-text">Collecting...</span>
+    </div>
+
+    <!-- Result -->
+    <div class="result" id="result-area" style="display:none">
+      <div class="result-icon" id="result-icon"></div>
+      <div class="result-text" id="result-text"></div>
+    </div>
+
+    <!-- Last collection -->
+    <div class="last-collection" id="last-collection" style="display:none">
+      <span class="last-label">Last saved:</span>
+      <span id="last-time"></span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

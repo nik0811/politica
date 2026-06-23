@@ -24,11 +24,17 @@ class Settings(BaseSettings):
     ELASTICSEARCH_URL: str = "http://elasticsearch:9200"
     
     # Security
+    SECRET_KEY: str = "politica-secret-key-change-in-production-use-openssl-rand-hex-32"
     JWT_SECRET: str = "your-secret-key-change-in-production"
     API_SECRET_KEY: str = "your-api-secret-change-in-production"
     
     # API
     API_V1_PREFIX: str = "/api"
+
+    # LLM Provider (LiteLLM)
+    LLM_PROVIDER: str = "ollama"       # ollama | openai | bedrock
+    LLM_MODEL: str = "ollama/llama3.2"
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
     
     class Config:
         env_file = ".env"
