@@ -113,65 +113,77 @@
   // Check if this is a tweet page opened by the scraper
   if (window.location.href.match(/\/(status|statuses)\/\d+/)) {
     // Wait for page to load and replies to render
-    setTimeout(async () => {
-      console.log('[Twitter Scraper] Extracting replies from tweet page')
-      
-      // Scroll down to load more replies
-      for (let i = 0; i < 3; i++) {
-        window.scrollTo(0, document.body.scrollHeight)
-        await new Promise(r => setTimeout(r, 1000))
-      }
-      
-      const replies = []
-      const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
-      
-      console.log(`[Twitter Scraper] Found ${allArticles.length} articles on tweet page`)
-      
-      // Skip the first one (main tweet), extract the rest (replies)
-      for (let i = 1; i < allArticles.length; i++) {
-        const replyEl = allArticles[i]
-        const textEl = replyEl.querySelector('[data-testid="tweetText"]')
-        const text = textEl?.textContent?.trim()
-        if (!text) {
-          console.log(`[Twitter Scraper] Skipping article ${i} - no text found`)
-          continue
+    const extractAndSend = async () => {
+      try {
+        console.log('[Twitter Scraper] Extracting replies from tweet page')
+        
+        // Scroll down to load more replies
+        for (let i = 0; i < 4; i++) {
+          window.scrollTo(0, document.body.scrollHeight)
+          await new Promise(r => setTimeout(r, 1200))
         }
         
-        const authorEl = replyEl.querySelector('[data-testid="User-Name"]')
-        const author = authorEl?.textContent?.trim() || 'unknown'
+        const replies = []
+        const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
         
-        const likeBtn = replyEl.querySelector('[data-testid="like"]')
-        const likeText = likeBtn?.textContent?.trim() || '0'
-        const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
+        console.log(`[Twitter Scraper] Found ${allArticles.length} articles on tweet page`)
         
-        const retweetBtn = replyEl.querySelector('[data-testid="retweet"]')
-        const retweetText = retweetBtn?.textContent?.trim() || '0'
-        const retweets = window.PoliticaCollector?.parseCount?.(retweetText) || 0
+        // Skip the first one (main tweet), extract the rest (replies)
+        for (let i = 1; i < allArticles.length; i++) {
+          const replyEl = allArticles[i]
+          const textEl = replyEl.querySelector('[data-testid="tweetText"]')
+          const text = textEl?.textContent?.trim()
+          if (!text) {
+            console.log(`[Twitter Scraper] Skipping article ${i} - no text found`)
+            continue
+          }
+          
+          const authorEl = replyEl.querySelector('[data-testid="User-Name"]')
+          const author = authorEl?.textContent?.trim() || 'unknown'
+          
+          const likeBtn = replyEl.querySelector('[data-testid="like"]')
+          const likeText = likeBtn?.textContent?.trim() || '0'
+          const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
+          
+          const retweetBtn = replyEl.querySelector('[data-testid="retweet"]')
+          const retweetText = retweetBtn?.textContent?.trim() || '0'
+          const retweets = window.PoliticaCollector?.parseCount?.(retweetText) || 0
+          
+          console.log(`[Twitter Scraper] ✓ Reply from ${author}`)
+          console.log(`[Twitter Scraper]   Text: ${text.slice(0, 100)}${text.length > 100 ? '...' : ''}`)
+          console.log(`[Twitter Scraper]   ❤️ ${likes} likes | 🔄 ${retweets} retweets`)
+          
+          replies.push({
+            author,
+            text,
+            likes,
+            retweets
+          })
+        }
         
-        console.log(`[Twitter Scraper] ✓ Reply from ${author}`)
-        console.log(`[Twitter Scraper]   Text: ${text.slice(0, 100)}${text.length > 100 ? '...' : ''}`)
-        console.log(`[Twitter Scraper]   ❤️ ${likes} likes | 🔄 ${retweets} retweets`)
+        console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
+        console.log(`[Twitter Scraper] Total replies extracted: ${replies.length}`)
+        console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
         
-        replies.push({
-          author,
-          text,
-          likes,
-          retweets
+        // Send to service worker
+        chrome.runtime.sendMessage({
+          type: 'TWEET_REPLIES_READY',
+          replies
+        }).catch((err) => {
+          console.error('[Twitter Scraper] Error sending replies:', err)
         })
+      } catch (err) {
+        console.error('[Twitter Scraper] Error during extraction:', err)
+        // Still send empty replies to avoid hanging
+        chrome.runtime.sendMessage({
+          type: 'TWEET_REPLIES_READY',
+          replies: []
+        }).catch(() => {})
       }
-      
-      console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
-      console.log(`[Twitter Scraper] Total replies extracted: ${replies.length}`)
-      console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
-      
-      // Send to service worker
-      chrome.runtime.sendMessage({
-        type: 'TWEET_REPLIES_READY',
-        replies
-      }).catch((err) => {
-        console.error('[Twitter Scraper] Error sending replies:', err)
-      })
-    }, 4000)  // Wait 4 seconds for initial load
+    }
+    
+    // Start extraction after 3 seconds
+    setTimeout(extractAndSend, 3000)
   }
 
   // ── Send doc directly to Twitter API endpoint ────────────────────────────────
@@ -421,6 +433,9 @@
               `✓ ${saved} posts, ${scraperState.commentsCollected} replies`, 
               'info'
             )
+            
+            // Add delay between tweet extractions to avoid overwhelming the browser
+            await new Promise(r => setTimeout(r, 2000))
           }
         } catch (err) {
           scraperState.errors++

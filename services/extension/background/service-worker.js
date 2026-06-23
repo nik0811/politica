@@ -437,17 +437,21 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
       console.log('[Service Worker] New tab created:', newTab.id)
       const newTabId = newTab.id
       let timeoutId
+      let messageHandled = false
 
       // Listen for messages from the new tab
       const messageListener = (message, sender) => {
-        if (sender.tab?.id === newTabId && message.type === 'TWEET_REPLIES_READY') {
+        if (sender.tab?.id === newTabId && message.type === 'TWEET_REPLIES_READY' && !messageHandled) {
+          messageHandled = true
           console.log('[Service Worker] Received replies from new tab:', message.replies?.length || 0)
           clearTimeout(timeoutId)
+          
+          // Remove this specific listener
           chrome.runtime.onMessage.removeListener(messageListener)
           
           // Close the new tab
           chrome.tabs.remove(newTabId, () => {
-            console.log('[Service Worker] Closed new tab')
+            console.log('[Service Worker] Closed new tab:', newTabId)
           })
           
           resolve({ replies: message.replies || [] })
@@ -456,13 +460,18 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
 
       chrome.runtime.onMessage.addListener(messageListener)
 
-      // Timeout after 10 seconds (increased from 8)
+      // Timeout after 12 seconds (increased from 10)
       timeoutId = setTimeout(() => {
-        console.log('[Service Worker] Timeout waiting for replies')
-        chrome.runtime.onMessage.removeListener(messageListener)
-        chrome.tabs.remove(newTabId, () => {})
-        resolve({ replies: [] })
-      }, 10000)
+        if (!messageHandled) {
+          console.log('[Service Worker] Timeout waiting for replies from tab:', newTabId)
+          messageHandled = true
+          chrome.runtime.onMessage.removeListener(messageListener)
+          chrome.tabs.remove(newTabId, () => {
+            console.log('[Service Worker] Closed tab after timeout:', newTabId)
+          })
+          resolve({ replies: [] })
+        }
+      }, 12000)
     })
   })
 }
