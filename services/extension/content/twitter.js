@@ -212,24 +212,28 @@
   async function collectAllTweets(maxPosts) {
     const url = window.location.href
 
-    // If on a single tweet status page, deep-scrape that tweet and its replies
+    // If on a single tweet status page, deep-scrape that tweet and its replies (don't navigate)
     if (url.match(/\/(status|statuses)\/\d+/)) {
       const result = await collectTweetDeep()
       return result
     }
 
+    // Profile/Timeline scraping - extract from profile page WITHOUT navigating
     const seen = new Set()
     let total = 0
     let noNewStreak = 0
     let saved = 0
 
-    window.PoliticaCollector.showNotification('Starting timeline deep scrape...', 'info')
+    window.PoliticaCollector.showNotification('Starting profile scrape...', 'info')
 
     while (total < maxPosts && noNewStreak < 5 && scraperState.isRunning) {
-      // Click any "Show more" / expansion buttons
+      console.log(`[Twitter Scraper] Loop iteration - total: ${total}, saved: ${saved}`)
+      
+      // Click any "Show more" / expansion buttons (but NOT "Discover more")
       clickTwitterLoadMore()
 
       const tweets = document.querySelectorAll('[data-testid="tweet"]')
+      console.log(`[Twitter Scraper] Found ${tweets.length} tweets on page`)
       let newFound = 0
 
       for (const tweet of tweets) {
@@ -238,35 +242,43 @@
         const textEl = tweet.querySelector('[data-testid="tweetText"]')
         const text = textEl?.textContent?.trim()
         if (!text || seen.has(text.slice(0, 100))) continue
+        
+        // Skip "Discover more" and promoted tweets
+        if (text.toLowerCase().includes('discover more') || 
+            tweet.querySelector('[data-testid="promotedBadge"]')) {
+          continue
+        }
+        
         seen.add(text.slice(0, 100))
         newFound++
         total++
 
         try {
-          // Click on the tweet to open it
-          const tweetLink = tweet.querySelector('a[href*="/status/"]')
-          if (tweetLink) {
-            tweetLink.click()
-            await new Promise(r => setTimeout(r, 1500))
-          }
-
-          // Extract full tweet data with all replies
-          const fullData = extractFullTweetData()
+          // Extract tweet data directly from profile page (no navigation)
+          const tweetData = extractTweetData(tweet, url)
+          
+          // Get reply count from the tweet element
+          const replyBtn = tweet.querySelector('[data-testid="reply"]')
+          const replyText = replyBtn?.textContent?.trim() || '0'
+          const replyCount = window.PoliticaCollector.parseCount(replyText)
+          
+          tweetData.comments_count = replyCount
+          tweetData.metadata = { replies: [] }
           
           // Send to API
-          await sendToTwitterApi(fullData)
+          await sendToTwitterApi(tweetData)
           saved++
           scraperState.postsCollected = saved
-          scraperState.commentsCollected += (fullData.metadata?.replies?.length || 0)
+          scraperState.commentsCollected += replyCount
 
-          // Go back to timeline
-          window.history.back()
-          await new Promise(r => setTimeout(r, 1000))
+          // Show progress
+          window.PoliticaCollector.showNotification(
+            `✓ ${saved} posts, ${scraperState.commentsCollected} replies`, 
+            'info'
+          )
         } catch (err) {
           scraperState.errors++
-          console.error('Error processing tweet:', err)
-          try { window.history.back() } catch (e) { /* ignore */ }
-          await new Promise(r => setTimeout(r, 500))
+          console.error('[Twitter Scraper] Error processing tweet:', err)
         }
 
         if (total >= maxPosts) break
@@ -274,28 +286,22 @@
 
       noNewStreak = newFound === 0 ? noNewStreak + 1 : 0
 
-      if (saved > 0 && saved % 5 === 0) {
-        window.PoliticaCollector.showNotification(`Deep scraping... ${saved}/${total} saved`, 'info')
-      }
-
+      // Scroll to load more tweets
       window.scrollTo(0, document.body.scrollHeight)
-      await new Promise(r => setTimeout(r, 2000))
+      await new Promise(r => setTimeout(r, 2500))
     }
 
-    window.PoliticaCollector.showNotification(`Collected ${saved} of ${total} tweets`, 'success')
-    return { success: true, count: total, saved }
+    console.log(`[Twitter Scraper] Scraping complete - saved: ${saved}`)
+    window.PoliticaCollector.showNotification(
+      `✓ Collected ${saved} posts with ${scraperState.commentsCollected} total replies`, 
+      'success'
+    )
+    return { success: true, count: total, saved, comments: scraperState.commentsCollected }
   }
 
   // ── Deep-scrape a single tweet page (expand replies then save) ──────────────
   async function collectTweetDeep() {
     window.PoliticaCollector.showNotification('Deep scraping tweet... expanding replies', 'info')
-
-    // Expand replies a few times
-    for (let i = 0; i < 5 && scraperState.isRunning; i++) {
-      expandAllReplies()
-      window.scrollTo(0, document.body.scrollHeight)
-      await new Promise(r => setTimeout(r, 1200))
-    }
 
     const primaryArticle = document.querySelector('article[data-testid="tweet"]')
     if (!primaryArticle) {
@@ -303,12 +309,26 @@
       return { error: 'No tweet found on this page' }
     }
 
+    // Expand replies multiple times with scrolling
+    for (let i = 0; i < 8 && scraperState.isRunning; i++) {
+      expandAllReplies()
+      window.scrollTo(0, document.body.scrollHeight)
+      await new Promise(r => setTimeout(r, 1200))
+    }
+
     const tweet = extractTweetData(primaryArticle, window.location.href)
+    
+    // Extract all replies with author info
     const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
     const replies = allArticles.slice(1)
       .map(el => {
         const d = extractTweetData(el, window.location.href)
-        return { author: d.author, content: d.text, likes_count: d.likes_count }
+        return { 
+          author: d.author, 
+          author_name: extractAuthorName(el),
+          content: d.text, 
+          likes_count: d.likes_count 
+        }
       })
       .filter(r => r.content && r.content !== tweet.text)
 
@@ -323,16 +343,19 @@
       window.PoliticaCollector.showNotification(
         `Saved tweet with ${replies.length} replies`, 'success'
       )
+      // Mark as done - don't try to navigate or scrape more
+      scraperState.isRunning = false
       return { success: true, count: 1, saved: 1, comments: replies.length }
     } catch (err) {
       scraperState.errors++
+      scraperState.isRunning = false
       window.PoliticaCollector.showNotification(err.message, 'error')
       return { error: err.message }
     }
   }
 
   // ── Extract full tweet data with all replies ────────────────────────────────
-  function extractFullTweetData() {
+  async function extractFullTweetDataWithReplies() {
     // Primary tweet
     const primaryArticle = document.querySelector('article[data-testid="tweet"]')
     if (!primaryArticle) {
@@ -341,16 +364,28 @@
 
     const tweet = extractTweetData(primaryArticle, window.location.href)
 
-    // Expand all "Show more replies" buttons
-    expandAllReplies()
+    // Scroll down and expand all "Show more replies" buttons multiple times
+    for (let i = 0; i < 8; i++) {
+      expandAllReplies()
+      window.scrollTo(0, document.body.scrollHeight)
+      await new Promise(r => setTimeout(r, 1000))
+    }
 
-    // Extract all replies
+    // Extract all replies with full author info
     const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
     const replyArticles = allArticles.slice(1)
-    const replies = replyArticles.map(el => {
-      const d = extractTweetData(el, window.location.href)
-      return { author: d.author, content: d.text, likes_count: d.likes_count }
-    }).filter(r => r.content && r.content !== tweet.text)
+    
+    const replies = replyArticles
+      .map(el => {
+        const d = extractTweetData(el, window.location.href)
+        return { 
+          author: d.author, 
+          author_name: extractAuthorName(el),
+          content: d.text, 
+          likes_count: d.likes_count 
+        }
+      })
+      .filter(r => r.content && r.content !== tweet.text)
 
     tweet.comments_count = replies.length
     tweet.metadata = { ...tweet.metadata, replies }
@@ -358,7 +393,17 @@
     return tweet
   }
 
-  // ── Expand all reply sections ──────────────────────────────────────────────
+  // ── Extract author name from tweet element ──────────────────────────────────
+  function extractAuthorName(articleEl) {
+    const nameEl = articleEl.querySelector('[data-testid="User-Name"]')
+    if (!nameEl) return ''
+    const text = nameEl.textContent || ''
+    // Format: "Name @handle" - extract just the name part
+    const parts = text.split('@')
+    return parts[0]?.trim() || ''
+  }
+
+  // ── Expand all reply sections (skip "Discover more") ────────────────────────
   function expandAllReplies() {
     let expanded = 0
     const patterns = [
@@ -368,11 +413,28 @@
       /show\s*more/i,
       /view\s*more/i
     ]
+    
+    // Patterns to SKIP
+    const skipPatterns = [
+      /discover\s*more/i,
+      /promoted/i,
+      /ad/i
+    ]
 
     const buttons = document.querySelectorAll('[role="button"]')
     for (const btn of buttons) {
       const text = (btn.textContent || '').trim()
       if (text.length > 60) continue
+      
+      // Skip "Discover more" and ads
+      let shouldSkip = false
+      for (const skipPattern of skipPatterns) {
+        if (skipPattern.test(text)) {
+          shouldSkip = true
+          break
+        }
+      }
+      if (shouldSkip) continue
 
       for (const pattern of patterns) {
         if (pattern.test(text)) {
@@ -388,7 +450,7 @@
     return expanded
   }
 
-  // ── Twitter-specific load-more helpers ──────────────────────────────────────
+  // ── Twitter-specific load-more helpers (skip "Discover more") ──────────────
   function clickTwitterLoadMore() {
     var clicked = 0
 
@@ -403,11 +465,28 @@
       /show\s*more/i,
       /view\s*more/i
     ]
+    
+    // Skip patterns
+    var skipPatterns = [
+      /discover\s*more/i,
+      /promoted/i,
+      /ad/i
+    ]
 
     for (var i = 0; i < buttons.length; i++) {
       var btn = buttons[i]
       var text = (btn.textContent || '').trim()
       if (text.length > 50) continue
+      
+      // Skip "Discover more" and ads
+      var shouldSkip = false
+      for (var sp = 0; sp < skipPatterns.length; sp++) {
+        if (skipPatterns[sp].test(text)) {
+          shouldSkip = true
+          break
+        }
+      }
+      if (shouldSkip) continue
 
       for (var p = 0; p < patterns.length; p++) {
         if (patterns[p].test(text)) {

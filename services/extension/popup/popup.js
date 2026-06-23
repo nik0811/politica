@@ -112,7 +112,7 @@ function renderPlatform(platform, url) {
   // Show deep scrape panel for all platforms (Instagram profiles, Facebook feeds, Twitter timelines)
   if ((platform === 'instagram' && !isPostPage(url, platform)) || 
       platform === 'facebook' || 
-      platform === 'twitter') {
+      (platform === 'twitter' && !isPostPage(url, platform))) {
     deepScrapePanel.style.display = 'block'
     deepScrapeToggle.addEventListener('click', toggleDeepScrape)
     pollDeepScrapeStatus()
@@ -130,6 +130,11 @@ function renderPlatform(platform, url) {
     if (/\/(status|statuses)\/\d+/.test(url)) {
       collectPageLabel.textContent = 'Collect This Tweet'
       collectPostBtn.style.display = 'none'
+      // For Twitter, recommend using Deep Scrape instead
+      const note = document.createElement('p')
+      note.style.cssText = 'font-size: 11px; color: #999; margin-top: 8px; font-style: italic;'
+      note.textContent = 'Tip: Use "Deep Scrape Profile" to collect tweets with all replies'
+      collectPageBtn.parentElement.appendChild(note)
     } else {
       collectPageLabel.textContent = 'Collect Timeline Tweets'
     }
@@ -384,6 +389,12 @@ async function runCollect(messageType) {
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    
+    // For Twitter single tweet pages, use deep scrape instead of collect page
+    const platform = detectPlatform(tab.url)
+    if (platform === 'twitter' && /\/(status|statuses)\/\d+/.test(tab.url) && messageType === 'COLLECT_PAGE') {
+      messageType = 'DEEP_SCRAPE_PROFILE'
+    }
 
     const response = await new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(tab.id, { type: messageType }, res => {
