@@ -141,7 +141,8 @@ class APIClient {
       if (typeof window !== "undefined") {
         window.location.href = "/login"
       }
-      throw new Error("Unauthorized")
+      // Return empty result instead of throwing to avoid console errors
+      return undefined as unknown as T
     }
 
     if (!response.ok) {

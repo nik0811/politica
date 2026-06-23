@@ -286,6 +286,11 @@ export default function DocumentsPage() {
         if (filterPlatform !== "all") params.platform = filterPlatform
         
         const data = await apiClient.getDocuments(params)
+        // If data is undefined, it means we got a 401 and were redirected
+        if (!data) {
+          setDocuments([])
+          return
+        }
         setDocuments(data)
         
         // Get total count for pagination
@@ -293,6 +298,11 @@ export default function DocumentsPage() {
         // Estimate total from response or use a separate count endpoint
         setTotalCount(Math.max(data.length + skip, totalCount))
       } catch (error) {
+        // Silently handle 401 errors - the redirect will take care of it
+        if (error instanceof Error && error.message.includes("Unauthorized")) {
+          // Don't log 401 errors as they're expected during logout/token expiry
+          return
+        }
         console.error("Failed to fetch documents:", error)
         setDocuments([])
       } finally {
