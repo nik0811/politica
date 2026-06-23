@@ -112,17 +112,30 @@
   // ── Send replies to service worker when page loads ──────────────────────────
   // Check if this is a tweet page opened by the scraper
   if (window.location.href.match(/\/(status|statuses)\/\d+/)) {
-    // Wait for page to load
-    setTimeout(() => {
+    // Wait for page to load and replies to render
+    setTimeout(async () => {
+      console.log('[Twitter Scraper] Extracting replies from tweet page')
+      
+      // Scroll down to load more replies
+      for (let i = 0; i < 3; i++) {
+        window.scrollTo(0, document.body.scrollHeight)
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      
       const replies = []
       const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
+      
+      console.log(`[Twitter Scraper] Found ${allArticles.length} articles on tweet page`)
       
       // Skip the first one (main tweet), extract the rest (replies)
       for (let i = 1; i < allArticles.length; i++) {
         const replyEl = allArticles[i]
         const textEl = replyEl.querySelector('[data-testid="tweetText"]')
         const text = textEl?.textContent?.trim()
-        if (!text) continue
+        if (!text) {
+          console.log(`[Twitter Scraper] Skipping article ${i} - no text found`)
+          continue
+        }
         
         const authorEl = replyEl.querySelector('[data-testid="User-Name"]')
         const author = authorEl?.textContent?.trim() || 'unknown'
@@ -131,6 +144,8 @@
         const likeText = likeBtn?.textContent?.trim() || '0'
         const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
         
+        console.log(`[Twitter Scraper] Found reply from ${author}: ${text.slice(0, 50)}...`)
+        
         replies.push({
           author,
           text,
@@ -138,14 +153,16 @@
         })
       }
       
+      console.log(`[Twitter Scraper] Sending ${replies.length} replies to service worker`)
+      
       // Send to service worker
       chrome.runtime.sendMessage({
         type: 'TWEET_REPLIES_READY',
         replies
-      }).catch(() => {
-        // Ignore errors if service worker is not available
+      }).catch((err) => {
+        console.error('[Twitter Scraper] Error sending replies:', err)
       })
-    }, 3000)
+    }, 4000)  // Wait 4 seconds for initial load
   }
 
   // ── Send doc directly to Twitter API endpoint ────────────────────────────────

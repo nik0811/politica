@@ -441,7 +441,7 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
       // Listen for messages from the new tab
       const messageListener = (message, sender) => {
         if (sender.tab?.id === newTabId && message.type === 'TWEET_REPLIES_READY') {
-          console.log('[Service Worker] Received replies from new tab')
+          console.log('[Service Worker] Received replies from new tab:', message.replies?.length || 0)
           clearTimeout(timeoutId)
           chrome.runtime.onMessage.removeListener(messageListener)
           
@@ -456,13 +456,13 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
 
       chrome.runtime.onMessage.addListener(messageListener)
 
-      // Timeout after 8 seconds
+      // Timeout after 10 seconds (increased from 8)
       timeoutId = setTimeout(() => {
         console.log('[Service Worker] Timeout waiting for replies')
         chrome.runtime.onMessage.removeListener(messageListener)
         chrome.tabs.remove(newTabId, () => {})
         resolve({ replies: [] })
-      }, 8000)
+      }, 10000)
     })
   })
 }
