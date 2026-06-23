@@ -135,6 +135,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
     }
 
+    if (message.type === 'EXTRACT_TWEET_REPLIES') {
+      handleExtractTweetReplies(message.tweetUrl, sender.tab.id)
+        .then(res => {
+          console.log('[Service Worker] EXTRACT_TWEET_REPLIES success')
+          sendResponse(res)
+        })
+        .catch(err => {
+          console.error('[Service Worker] EXTRACT_TWEET_REPLIES error:', err)
+          sendResponse({ error: err.message })
+        })
+      return true
+    }
+
     console.warn('[Service Worker] Unknown message type:', message.type)
   } catch (err) {
     console.error('[Service Worker] Unexpected error in message handler:', err)
@@ -409,4 +422,47 @@ async function testConnection(apiUrl, apiToken) {
     console.error('[Service Worker] testConnection failed:', err)
     throw err
   }
+}
+
+async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
+  console.log('[Service Worker] Opening tweet in new tab:', tweetUrl)
+  
+  return new Promise((resolve, reject) => {
+    // Open the tweet URL in a new tab
+    chrome.tabs.create({ url: tweetUrl, active: false }, (newTab) => {
+      if (chrome.runtime.lastError) {
+        return reject(new Error(chrome.runtime.lastError.message))
+      }
+
+      console.log('[Service Worker] New tab created:', newTab.id)
+      const newTabId = newTab.id
+      let timeoutId
+
+      // Listen for messages from the new tab
+      const messageListener = (message, sender) => {
+        if (sender.tab?.id === newTabId && message.type === 'TWEET_REPLIES_READY') {
+          console.log('[Service Worker] Received replies from new tab')
+          clearTimeout(timeoutId)
+          chrome.runtime.onMessage.removeListener(messageListener)
+          
+          // Close the new tab
+          chrome.tabs.remove(newTabId, () => {
+            console.log('[Service Worker] Closed new tab')
+          })
+          
+          resolve({ replies: message.replies || [] })
+        }
+      }
+
+      chrome.runtime.onMessage.addListener(messageListener)
+
+      // Timeout after 8 seconds
+      timeoutId = setTimeout(() => {
+        console.log('[Service Worker] Timeout waiting for replies')
+        chrome.runtime.onMessage.removeListener(messageListener)
+        chrome.tabs.remove(newTabId, () => {})
+        resolve({ replies: [] })
+      }, 8000)
+    })
+  })
 }

@@ -109,6 +109,45 @@
     }
   })
 
+  // ── Send replies to service worker when page loads ──────────────────────────
+  // Check if this is a tweet page opened by the scraper
+  if (window.location.href.match(/\/(status|statuses)\/\d+/)) {
+    // Wait for page to load
+    setTimeout(() => {
+      const replies = []
+      const allArticles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'))
+      
+      // Skip the first one (main tweet), extract the rest (replies)
+      for (let i = 1; i < allArticles.length; i++) {
+        const replyEl = allArticles[i]
+        const textEl = replyEl.querySelector('[data-testid="tweetText"]')
+        const text = textEl?.textContent?.trim()
+        if (!text) continue
+        
+        const authorEl = replyEl.querySelector('[data-testid="User-Name"]')
+        const author = authorEl?.textContent?.trim() || 'unknown'
+        
+        const likeBtn = replyEl.querySelector('[data-testid="like"]')
+        const likeText = likeBtn?.textContent?.trim() || '0'
+        const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
+        
+        replies.push({
+          author,
+          text,
+          likes
+        })
+      }
+      
+      // Send to service worker
+      chrome.runtime.sendMessage({
+        type: 'TWEET_REPLIES_READY',
+        replies
+      }).catch(() => {
+        // Ignore errors if service worker is not available
+      })
+    }, 3000)
+  }
+
   // ── Send doc directly to Twitter API endpoint ────────────────────────────────
   function sendToTwitterApi(doc) {
     return new Promise((resolve, reject) => {
@@ -254,7 +293,7 @@
       return result
     }
 
-    // Profile/Timeline scraping - open each tweet in new tab to get replies
+    // Profile/Timeline scraping - use service worker to open tweets in new tabs
     const seen = new Set()
     let total = 0
     let noNewStreak = 0
@@ -295,12 +334,7 @@
           const tweetUrl = tweetLink?.href
           
           if (tweetUrl) {
-            console.log(`[Twitter Scraper] Opening tweet in new tab: ${tweetUrl}`)
-            // Open in new tab to extract replies without affecting profile page
-            const newTab = window.open(tweetUrl, '_blank')
-            
-            // Wait for tab to load and extract data
-            await new Promise(r => setTimeout(r, 3000))
+            console.log(`[Twitter Scraper] Extracting replies for: ${tweetUrl}`)
             
             // Extract tweet data from profile page (basic info)
             const tweetData = extractTweetData(tweet, url)
@@ -312,45 +346,27 @@
             
             tweetData.comments_count = replyCount
             
-            // Try to get replies from the new tab if it opened
+            // Use service worker to open tweet in new tab and extract replies
             let replies = []
-            if (newTab && !newTab.closed) {
-              try {
-                // Wait a bit more for content to load
-                await new Promise(r => setTimeout(r, 2000))
-                
-                // Send message to new tab to extract replies
-                const replyData = await new Promise((resolve) => {
-                  const checkInterval = setInterval(() => {
-                    try {
-                      newTab.postMessage({ type: 'EXTRACT_REPLIES' }, '*')
-                    } catch (e) {}
-                  }, 500)
-                  
-                  const listener = (event) => {
-                    if (event.data?.type === 'REPLIES_EXTRACTED') {
-                      clearInterval(checkInterval)
-                      window.removeEventListener('message', listener)
-                      resolve(event.data.replies || [])
+            try {
+              const result = await new Promise((resolve, reject) => {
+                chrome.runtime.sendMessage(
+                  { type: 'EXTRACT_TWEET_REPLIES', tweetUrl },
+                  (response) => {
+                    if (chrome.runtime.lastError) {
+                      reject(new Error(chrome.runtime.lastError.message))
+                    } else if (response?.error) {
+                      reject(new Error(response.error))
+                    } else {
+                      resolve(response)
                     }
                   }
-                  window.addEventListener('message', listener)
-                  
-                  // Timeout after 5 seconds
-                  setTimeout(() => {
-                    clearInterval(checkInterval)
-                    window.removeEventListener('message', listener)
-                    resolve([])
-                  }, 5000)
-                })
-                
-                replies = replyData
-              } catch (e) {
-                console.log('[Twitter Scraper] Could not extract replies from new tab:', e)
-              }
-              
-              // Close the new tab
-              try { newTab.close() } catch (e) {}
+                )
+              })
+              replies = result.replies || []
+              console.log(`[Twitter Scraper] Got ${replies.length} replies`)
+            } catch (err) {
+              console.log('[Twitter Scraper] Could not extract replies:', err)
             }
             
             tweetData.metadata = { replies }
