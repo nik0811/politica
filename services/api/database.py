@@ -3,11 +3,11 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from config import settings
 
-# Create engine
+# Create engine - disable SQL echo for cleaner logs
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    echo=settings.ENVIRONMENT == "development"
+    echo=False  # Set to True only for debugging SQL queries
 )
 
 # Session factory

@@ -4,11 +4,12 @@ from sqlalchemy import func
 from typing import List, Optional, Union
 from pydantic import BaseModel
 from datetime import datetime
-from database import get_db
+from database import get_db, SessionLocal
 from models.models import AgentJob, Document as DocumentModel, PostComment
 from auth import get_current_user, require_role
 import uuid
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -199,7 +200,24 @@ class SchedulerConfig(BaseModel):
 @router.get("/scheduler/config")
 async def get_scheduler_config(current_user: dict = Depends(get_current_user)):
     """Get the current scheduler configuration"""
-    return _scheduler_config
+    global _scheduler
+    
+    scheduler_running = _scheduler is not None and _scheduler.running if _scheduler else False
+    next_run = None
+    
+    if scheduler_running and _scheduler:
+        try:
+            job = _scheduler.get_job("daily_agents")
+            if job and job.next_run_time:
+                next_run = job.next_run_time.isoformat()
+        except:
+            pass
+    
+    return {
+        **_scheduler_config,
+        "scheduler_running": scheduler_running,
+        "next_run": next_run,
+    }
 
 
 @router.post("/scheduler/config")
@@ -229,47 +247,107 @@ async def run_daily_agents(
     _: dict = Depends(require_role(["Admin", "Editor"])),
 ):
     """Manually trigger the daily agent run on documents and comments"""
-    agents_to_run = [
-        "sentiment_analysis",
-        "entity_extraction",
-        "topic_classification",
-        "promise_extraction",
-    ]
+    # Count pending documents
+    doc_count = db.query(func.count()).select_from(DocumentModel).filter(DocumentModel.status == "pending").scalar() or 0
+    # Count unprocessed comments
+    comment_count = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
+    total = doc_count + comment_count
     
-    jobs = []
-    for agent_type in agents_to_run:
-        # Count pending documents
-        doc_count = db.query(func.count()).select_from(DocumentModel).filter(DocumentModel.status == "pending").scalar() or 0
-        # Count unprocessed comments
-        comment_count = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
-        total = doc_count + comment_count
-        
-        if total > 0:
-            job = AgentJob(
-                id=str(uuid.uuid4()),
-                agent_type=agent_type,
-                status="pending",
-                documents_processed=0,
-                documents_total=total,
-            )
-            db.add(job)
-            jobs.append(job)
+    if total == 0:
+        return {
+            "status": "success",
+            "jobs_created": 0,
+            "jobs": [],
+            "message": "No pending documents or comments to process",
+            "timestamp": datetime.now().isoformat(),
+        }
     
-    if jobs:
-        db.commit()
-        for job in jobs:
-            db.refresh(job)
+    # Create a single combined job for tracking
+    job = AgentJob(
+        id=str(uuid.uuid4()),
+        agent_type="all_agents",
+        status="running",
+        documents_processed=0,
+        documents_total=total,
+        started_at=datetime.utcnow(),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
     
     _scheduler_config["last_run"] = datetime.now().isoformat()
     
-    logger.info(f"Daily agent run triggered: {len(jobs)} jobs created")
+    # Start background processing in a truly non-blocking way
+    asyncio.create_task(_process_all_pending(job.id))
+    
+    logger.info(f"Daily agent run triggered: processing {total} items (job {job.id})")
     
     return {
         "status": "success",
-        "jobs_created": len(jobs),
-        "jobs": [{"id": j.id, "agent_type": j.agent_type} for j in jobs],
+        "jobs_created": 1,
+        "jobs": [{"id": job.id, "agent_type": job.agent_type}],
         "timestamp": _scheduler_config["last_run"],
     }
+
+
+async def _process_all_pending(job_id: str):
+    """Background task to process all pending documents and comments"""
+    db = SessionLocal()
+    try:
+        from services.processor import process_document, process_comment
+        
+        job = db.query(AgentJob).filter(AgentJob.id == job_id).first()
+        if not job:
+            logger.error(f"Job {job_id} not found")
+            return
+        
+        processed = 0
+        
+        # Process pending documents
+        pending_docs = db.query(DocumentModel).filter(DocumentModel.status == "pending").all()
+        for doc in pending_docs:
+            try:
+                # Process document (this does sentiment, entities, topics, promises in one LLM call)
+                success = await process_document(doc.id)
+                if success:
+                    processed += 1
+                    job.documents_processed = processed
+                    db.commit()
+            except Exception as e:
+                logger.error(f"Error processing document {doc.id}: {e}")
+        
+        # Process unprocessed comments
+        pending_comments = db.query(PostComment).filter(PostComment.processed_at.is_(None)).all()
+        for comment in pending_comments:
+            try:
+                success = await process_comment(comment.id)
+                if success:
+                    processed += 1
+                    job.documents_processed = processed
+                    db.commit()
+            except Exception as e:
+                logger.error(f"Error processing comment {comment.id}: {e}")
+        
+        # Mark job as completed
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        
+        logger.info(f"Job {job_id} completed: processed {processed} items")
+        
+    except Exception as e:
+        logger.error(f"Error in background processing job {job_id}: {e}")
+        try:
+            job = db.query(AgentJob).filter(AgentJob.id == job_id).first()
+            if job:
+                job.status = "failed"
+                job.error = str(e)
+                job.completed_at = datetime.utcnow()
+                db.commit()
+        except:
+            pass
+    finally:
+        db.close()
 
 
 def _start_scheduler(db: Session):
@@ -316,35 +394,49 @@ def _stop_scheduler():
 
 
 def _scheduled_daily_run():
-    """Background job that runs daily agents"""
+    """Background job that runs daily agents - actually processes documents"""
+    import asyncio
+    
     try:
         from database import SessionLocal
         db = SessionLocal()
         
-        agents_to_run = [
-            "sentiment_analysis",
-            "entity_extraction",
-            "topic_classification",
-            "promise_extraction",
-        ]
+        # Count pending items
+        doc_count = db.query(func.count()).select_from(DocumentModel).filter(DocumentModel.status == "pending").scalar() or 0
+        comment_count = db.query(func.count()).select_from(PostComment).filter(PostComment.processed_at.is_(None)).scalar() or 0
+        total = doc_count + comment_count
         
-        for agent_type in agents_to_run:
-            total = db.query(func.count()).filter(DocumentModel.status == "pending").scalar() or 0
-            
-            if total > 0:
-                job = AgentJob(
-                    id=str(uuid.uuid4()),
-                    agent_type=agent_type,
-                    status="pending",
-                    documents_processed=0,
-                    documents_total=total,
-                )
-                db.add(job)
+        if total == 0:
+            logger.info("Scheduled run: no pending items to process")
+            _scheduler_config["last_run"] = datetime.now().isoformat()
+            db.close()
+            return
         
+        # Create job for tracking
+        job = AgentJob(
+            id=str(uuid.uuid4()),
+            agent_type="scheduled_run",
+            status="running",
+            documents_processed=0,
+            documents_total=total,
+            started_at=datetime.utcnow(),
+        )
+        db.add(job)
         db.commit()
+        db.refresh(job)
+        
         _scheduler_config["last_run"] = datetime.now().isoformat()
-        logger.info("Daily agent run completed")
+        logger.info(f"Scheduled run started: processing {total} items (job {job.id})")
+        
+        db.close()
+        
+        # Run the async processing in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_process_all_pending(job.id))
+        finally:
+            loop.close()
+        
     except Exception as e:
         logger.error(f"Error in scheduled daily run: {e}")
-    finally:
-        db.close()

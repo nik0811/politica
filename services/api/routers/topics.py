@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func, text
 from typing import List, Optional
 from database import get_db
 from models.models import Topic as TopicModel, Document as DocumentModel
@@ -8,14 +9,59 @@ from models.schemas import Topic, TopicCreate, TopicUpdate, Document
 router = APIRouter()
 
 
-@router.get("/", response_model=List[Topic])
+@router.get("/")
 async def get_topics(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """Get all topics with pagination"""
-    return db.query(TopicModel).offset(skip).limit(limit).all()
+    """Get all topics with pagination and sentiment averages"""
+    # Get topics with sentiment averages calculated from documents
+    try:
+        query = text("""
+            SELECT 
+                t.id,
+                t.name,
+                t.description,
+                t.parent_id,
+                t.document_count,
+                t.created_at,
+                COALESCE(AVG(d.sentiment), 0) as sentiment_avg
+            FROM topics t
+            LEFT JOIN documents d ON d.topics::jsonb ? t.name
+            GROUP BY t.id, t.name, t.description, t.parent_id, t.document_count, t.created_at
+            ORDER BY t.document_count DESC
+            LIMIT :limit OFFSET :skip
+        """)
+        results = db.execute(query, {"limit": limit, "skip": skip}).fetchall()
+        
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "description": r.description,
+                "parent_id": r.parent_id,
+                "document_count": r.document_count or 0,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "sentiment_avg": float(r.sentiment_avg) if r.sentiment_avg else 0.0
+            }
+            for r in results
+        ]
+    except Exception as e:
+        # Fallback to simple query without sentiment
+        topics = db.query(TopicModel).offset(skip).limit(limit).all()
+        return [
+            {
+                "id": t.id,
+                "name": t.name,
+                "description": t.description,
+                "parent_id": t.parent_id,
+                "document_count": t.document_count or 0,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "sentiment_avg": 0.0
+            }
+            for t in topics
+        ]
 
 
 @router.get("/{topic_id}/documents", response_model=List[Document])

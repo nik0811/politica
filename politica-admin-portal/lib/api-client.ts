@@ -38,6 +38,8 @@ export interface Document {
   collected_at?: string
   status: string
   sentiment?: number
+  topics?: string[]
+  entities?: string[]
   created_at: string
   updated_at: string
 
@@ -263,7 +265,19 @@ class APIClient {
     topic?: string
     start_date?: string
     end_date?: string
-  }): Promise<TrendData[]> {
+  }): Promise<{
+    topics?: any[]
+    sentiment_overview?: {
+      overall: number
+      distribution: {
+        positive: number
+        neutral: number
+        negative: number
+      }
+    }
+    daily_sentiment?: TrendData[]
+    date_range?: { start: string | null; end: string | null }
+  }> {
     const queryParams = new URLSearchParams()
     if (params?.period) queryParams.append("period", params.period)
     if (params?.topic) queryParams.append("topic", params.topic)
@@ -271,7 +285,7 @@ class APIClient {
     if (params?.end_date) queryParams.append("end_date", params.end_date)
 
     const query = queryParams.toString()
-    return this.request<TrendData[]>(`/api/analytics/trends${query ? `?${query}` : ""}`)
+    return this.request(`/api/analytics/trends${query ? `?${query}` : ""}`)
   }
 
   async getEngagementStats(params?: {
@@ -300,6 +314,38 @@ class APIClient {
     if (params?.end_date) queryParams.append("end_date", params.end_date)
     const query = queryParams.toString()
     return this.request<any>(`/api/analytics/engagement${query ? `?${query}` : ""}`)
+  }
+
+  // ─── Topics ───────────────────────────────────────────────────────────────────
+
+  async getTopics(params?: { skip?: number; limit?: number }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.skip) queryParams.append("skip", params.skip.toString())
+    if (params?.limit) queryParams.append("limit", params.limit.toString())
+    const query = queryParams.toString()
+    return this.request<any[]>(`/api/topics${query ? `?${query}` : ""}`)
+  }
+
+  // ─── Entities ─────────────────────────────────────────────────────────────────
+
+  async getEntities(params?: { skip?: number; limit?: number; type?: string }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.skip) queryParams.append("skip", params.skip.toString())
+    if (params?.limit) queryParams.append("limit", params.limit.toString())
+    if (params?.type) queryParams.append("type", params.type)
+    const query = queryParams.toString()
+    return this.request<any[]>(`/api/entities${query ? `?${query}` : ""}`)
+  }
+
+  // ─── Promises ─────────────────────────────────────────────────────────────────
+
+  async getPromises(params?: { skip?: number; limit?: number; status?: string }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    if (params?.skip) queryParams.append("skip", params.skip.toString())
+    if (params?.limit) queryParams.append("limit", params.limit.toString())
+    if (params?.status) queryParams.append("status", params.status)
+    const query = queryParams.toString()
+    return this.request<any[]>(`/api/promises${query ? `?${query}` : ""}`)
   }
 
   async getTopicsEngagement(): Promise<{
@@ -654,6 +700,7 @@ class APIClient {
 
   async getIngestionStats(): Promise<{
     total_documents: number
+    total_comments: number
     by_platform: Record<string, number>
     last_24h: number
     last_7d: number

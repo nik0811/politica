@@ -12,6 +12,7 @@ from pydantic import BaseModel, field_validator
 from datetime import datetime, timedelta
 from database import get_db
 from models.models import Document, PostComment, generate_uuid
+from routers.settings import Settings
 from llm import chat_completion, LLM_MODEL
 
 logger = logging.getLogger(__name__)
@@ -215,8 +216,24 @@ def _create_document(
     return doc
 
 
-def _trigger_background_processing(doc_id: str) -> None:
-    """Fire-and-forget: schedule AI processing for the newly ingested document."""
+def _trigger_background_processing(doc_id: str, db: Session = None) -> None:
+    """Fire-and-forget: schedule AI processing for the newly ingested document.
+    
+    Checks the 'auto_process' setting before triggering processing.
+    """
+    # Check if auto-processing is enabled
+    if db:
+        try:
+            setting = db.query(Settings).filter(
+                Settings.category == "processing",
+                Settings.key == "auto_process"
+            ).first()
+            if setting and setting.value is False:
+                logger.debug("Auto-processing disabled, skipping doc %s", doc_id)
+                return
+        except Exception as e:
+            logger.debug("Could not check auto_process setting: %s", e)
+    
     async def _run():
         try:
             from services.processor import process_document
@@ -270,7 +287,7 @@ async def ingest_instagram(data: IngestInstagramPost, db: Session = Depends(get_
             db.commit()
             db.refresh(existing_post)
             
-            _trigger_background_processing(existing_post.id)
+            _trigger_background_processing(existing_post.id, db)
             return IngestResponse(
                 id=existing_post.id,
                 status="updated",
@@ -289,7 +306,7 @@ async def ingest_instagram(data: IngestInstagramPost, db: Session = Depends(get_
             )
     
     doc = _create_document(db, "instagram", data)
-    _trigger_background_processing(doc.id)
+    _trigger_background_processing(doc.id, db)
     return IngestResponse(
         id=doc.id,
         status="created",
@@ -334,7 +351,7 @@ async def ingest_twitter(data: IngestTwitterPost, db: Session = Depends(get_db))
             db.commit()
             db.refresh(existing_post)
             
-            _trigger_background_processing(existing_post.id)
+            _trigger_background_processing(existing_post.id, db)
             return IngestResponse(
                 id=existing_post.id,
                 status="updated",
@@ -353,7 +370,7 @@ async def ingest_twitter(data: IngestTwitterPost, db: Session = Depends(get_db))
             )
     
     doc = _create_document(db, "twitter", data)
-    _trigger_background_processing(doc.id)
+    _trigger_background_processing(doc.id, db)
     return IngestResponse(
         id=doc.id,
         status="created",
@@ -398,7 +415,7 @@ async def ingest_facebook(data: IngestFacebookPost, db: Session = Depends(get_db
             db.commit()
             db.refresh(existing_post)
             
-            _trigger_background_processing(existing_post.id)
+            _trigger_background_processing(existing_post.id, db)
             return IngestResponse(
                 id=existing_post.id,
                 status="updated",
@@ -417,7 +434,7 @@ async def ingest_facebook(data: IngestFacebookPost, db: Session = Depends(get_db
             )
     
     doc = _create_document(db, "facebook", data)
-    _trigger_background_processing(doc.id)
+    _trigger_background_processing(doc.id, db)
     return IngestResponse(
         id=doc.id,
         status="created",
@@ -555,6 +572,7 @@ async def ingestion_stats(db: Session = Depends(get_db)):
     last_7d = now - timedelta(days=7)
 
     total = db.query(sa_func.count(Document.id)).scalar() or 0
+    total_comments = db.query(sa_func.count(PostComment.id)).scalar() or 0
 
     by_platform = (
         db.query(Document.platform, sa_func.count(Document.id))
@@ -599,6 +617,7 @@ async def ingestion_stats(db: Session = Depends(get_db)):
 
     return {
         "total_documents": total,
+        "total_comments": total_comments,
         "by_platform": {p: c for p, c in by_platform},
         "last_24h": last_24h_count,
         "last_7d": last_7d_count,

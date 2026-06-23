@@ -31,11 +31,12 @@ export default function AnalyticsPage() {
   async function fetchAll() {
     try {
       setLoading(true)
-      const [trendsData, engagementData] = await Promise.all([
+      const [trendsData, engagementData, weeklyTrendsData] = await Promise.all([
         apiClient.getTrends().catch(() => ({ topics: [], sentiment_overview: {} })),
         apiClient.getEngagementStats().catch(() => null),
+        apiClient.getWeeklyTrends().catch(() => ({ weekly_trends: [] })),
       ])
-      setWeeklyData([])
+      setWeeklyData(weeklyTrendsData.weekly_trends || [])
       setTrends(trendsData)
       setEngagement(engagementData)
     } catch (error) {
@@ -127,7 +128,7 @@ export default function AnalyticsPage() {
               <Users className="size-8 text-violet-400 shrink-0" />
               <div>
                 <p className="text-2xl font-bold text-foreground tabular-nums">
-                  {engagement.top_commenters?.length || 0}
+                  {engagement.unique_commenters_count || 0}
                 </p>
                 <p className="text-xs text-muted-foreground">Unique commenters</p>
               </div>
@@ -235,14 +236,14 @@ export default function AnalyticsPage() {
         <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Top Commenters</CardTitle>
-            <CardDescription className="text-xs">Most active comment authors</CardDescription>
+            <CardDescription className="text-xs">Most active comment authors ({engagement?.unique_commenters_count || 0} unique)</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
             {(engagement?.top_commenters?.length ?? 0) === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground">No commenter data yet.</div>
             ) : (
-              <div className="divide-y divide-border">
-                {engagement.top_commenters.slice(0, 8).map((c: any, i: number) => (
+              <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
+                {engagement.top_commenters.slice(0, 15).map((c: any, i: number) => (
                   <div key={c.handle} className="flex items-center gap-3 px-4 py-2.5 hover:bg-accent/30 transition-colors">
                     <span className="text-[10px] text-muted-foreground w-4 shrink-0">{i + 1}</span>
                     <div className="size-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">

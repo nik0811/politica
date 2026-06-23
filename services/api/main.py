@@ -16,9 +16,19 @@ from auth import get_current_user
 from token_auth import validate_api_token
 from middleware.audit import AuditMiddleware
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - reduce verbosity
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
 logger = logging.getLogger(__name__)
+
+# Reduce noise from verbose loggers
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 def run_column_migrations():
     """Add any missing columns to existing tables (safe to run on every startup)."""

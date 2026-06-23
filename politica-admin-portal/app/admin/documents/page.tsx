@@ -27,6 +27,8 @@ import {
   Share2,
   Calendar,
   User,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { apiClient, type Document, type PostComment } from "@/lib/api-client"
 
@@ -268,13 +270,28 @@ export default function DocumentsPage() {
   const [filterStatus, setFilterStatus] = useState<string>("all")
   const [filterPlatform, setFilterPlatform] = useState<string>("all")
   const [selected, setSelected] = useState<Document | null>(null)
+  
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const pageSize = 25
 
   useEffect(() => {
     async function fetchDocuments() {
       try {
         setLoading(true)
-        const data = await apiClient.getDocuments({ limit: 100 })
+        const skip = (page - 1) * pageSize
+        const params: any = { skip, limit: pageSize }
+        if (filterStatus !== "all") params.status = filterStatus
+        if (filterPlatform !== "all") params.platform = filterPlatform
+        
+        const data = await apiClient.getDocuments(params)
         setDocuments(data)
+        
+        // Get total count for pagination
+        const allData = await apiClient.getDocuments({ limit: 1 })
+        // Estimate total from response or use a separate count endpoint
+        setTotalCount(Math.max(data.length + skip, totalCount))
       } catch (error) {
         console.error("Failed to fetch documents:", error)
         setDocuments([])
@@ -284,7 +301,12 @@ export default function DocumentsPage() {
     }
 
     fetchDocuments()
-  }, [])
+  }, [page, filterStatus, filterPlatform])
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [filterStatus, filterPlatform])
 
   const filtered = documents.filter((d) => {
     const entities = d.entities ?? []
@@ -293,10 +315,10 @@ export default function DocumentsPage() {
       (d.author_handle ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (d.author ?? "").toLowerCase().includes(search.toLowerCase()) ||
       entities.some((e) => e.toLowerCase().includes(search.toLowerCase()))
-    const matchStatus = filterStatus === "all" || d.status === filterStatus
-    const matchPlatform = filterPlatform === "all" || d.platform === filterPlatform
-    return matchSearch && matchStatus && matchPlatform
+    return matchSearch
   })
+
+  const totalPages = Math.ceil(totalCount / pageSize) || 1
 
   if (loading) {
     return (
@@ -341,7 +363,32 @@ export default function DocumentsPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-sm font-medium">Documents</CardTitle>
-              <CardDescription className="text-xs">{filtered.length} of {documents.length} records — click a row to inspect</CardDescription>
+              <CardDescription className="text-xs">
+                Page {page} of {totalPages} — {filtered.length} records shown
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="text-xs text-muted-foreground min-w-[60px] text-center">
+                {page} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setPage(p => p + 1)}
+                disabled={documents.length < pageSize || loading}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
             </div>
           </div>
         </CardHeader>
@@ -428,8 +475,10 @@ export default function DocumentsPage() {
                       </td>
                       {/* Sentiment */}
                       <td className="px-4 py-3">
-                        <span className={`font-medium ${sentiment > 0.5 ? "text-[var(--chart-3)]" : sentiment > 0 ? "text-[var(--chart-4)]" : sentiment < 0 ? "text-destructive" : "text-muted-foreground"}`}>
-                          {sentiment !== 0 ? (sentiment > 0 ? "+" : "") + sentiment.toFixed(2) : "—"}
+                        <span className={`font-medium ${sentiment > 0.3 ? "text-[var(--chart-3)]" : sentiment < -0.3 ? "text-destructive" : "text-muted-foreground"}`}>
+                          {sentiment !== null && sentiment !== undefined ? (
+                            sentiment > 0 ? `+${sentiment.toFixed(2)}` : sentiment.toFixed(2)
+                          ) : "—"}
                         </span>
                       </td>
                       {/* Status */}
@@ -456,6 +505,56 @@ export default function DocumentsPage() {
               </tbody>
             </table>
           </div>
+          
+          {/* Bottom Pagination */}
+          {filtered.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+              <p className="text-xs text-muted-foreground">
+                Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, ((page - 1) * pageSize) + filtered.length)} of {totalCount} documents
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1 || loading}
+                >
+                  First
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <span className="text-xs text-muted-foreground min-w-[80px] text-center">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={documents.length < pageSize || loading}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page >= totalPages || documents.length < pageSize || loading}
+                >
+                  Last
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

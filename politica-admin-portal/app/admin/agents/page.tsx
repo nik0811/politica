@@ -59,9 +59,14 @@ export default function AgentsPage() {
   const [schedulerHour, setSchedulerHour] = useState(2)
   const [schedulerMinute, setSchedulerMinute] = useState(0)
   const [lastRun, setLastRun] = useState<string | null>(null)
+  const [nextRun, setNextRun] = useState<string | null>(null)
+  const [schedulerRunning, setSchedulerRunning] = useState(false)
   const [schedulerUpdating, setSchedulerUpdating] = useState(false)
   const [runningDaily, setRunningDaily] = useState(false)
   const [runMessage, setRunMessage] = useState<{ text: string; type: "success" | "error" } | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [forceRunOnIngestion, setForceRunOnIngestion] = useState(true)
+  const [forceRunUpdating, setForceRunUpdating] = useState(false)
 
   async function fetchData() {
     try {
@@ -71,7 +76,16 @@ export default function AgentsPage() {
       console.error("Failed to fetch agent data:", error)
     } finally {
       setLoading(false)
+      setRefreshing(false)
     }
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    await fetchData()
+    await fetchLLMConfig()
+    await fetchSchedulerConfig()
+    await fetchProcessingSettings()
   }
 
   async function fetchLLMConfig() {
@@ -91,8 +105,31 @@ export default function AgentsPage() {
       setSchedulerHour(data.hour ?? 2)
       setSchedulerMinute(data.minute ?? 0)
       setLastRun(data.last_run ?? null)
+      setNextRun(data.next_run ?? null)
+      setSchedulerRunning(data.scheduler_running ?? false)
     } catch {
       // silently ignore
+    }
+  }
+
+  async function fetchProcessingSettings() {
+    try {
+      const data = await apiClient.getSettingsByCategory("processing")
+      setForceRunOnIngestion(data.auto_process?.value ?? true)
+    } catch {
+      // silently ignore
+    }
+  }
+
+  async function handleForceRunToggle() {
+    setForceRunUpdating(true)
+    try {
+      await apiClient.updateSetting("processing", "auto_process", !forceRunOnIngestion)
+      setForceRunOnIngestion(!forceRunOnIngestion)
+    } catch (error) {
+      console.error("Failed to update setting:", error)
+    } finally {
+      setForceRunUpdating(false)
     }
   }
 
@@ -173,6 +210,7 @@ export default function AgentsPage() {
     fetchData()
     fetchLLMConfig()
     fetchSchedulerConfig()
+    fetchProcessingSettings()
   }, [])
 
   // Auto-poll every 5s when any job is pending or running
@@ -185,8 +223,27 @@ export default function AgentsPage() {
 
   // Filter to show only active jobs (pending/running) or recent completed
   const activeJobs = jobs.filter(j => j.status === "pending" || j.status === "running")
+  
+  // Only show legitimate completed jobs
+  // The new system creates jobs with agent_type "all_agents" or "scheduled_run"
+  // Old fake jobs have individual agent types and completed instantly
   const recentCompletedJobs = jobs
-    .filter(j => j.status === "completed" || j.status === "failed")
+    .filter(j => {
+      if (j.status !== "completed" && j.status !== "failed") return false
+      
+      // Only show jobs from the new unified processing system
+      // or jobs that actually took time to complete
+      if (j.started_at && j.completed_at) {
+        const durationMs = new Date(j.completed_at).getTime() - new Date(j.started_at).getTime()
+        // If it processed documents and took reasonable time (at least 1 second per 10 docs)
+        const minExpectedMs = Math.max(1000, j.documents_processed * 100)
+        if (durationMs < minExpectedMs && j.documents_processed > 5) {
+          return false // Fake job - completed too fast
+        }
+      }
+      
+      return true
+    })
     .slice(0, 10)
 
   if (loading) {
@@ -206,9 +263,9 @@ export default function AgentsPage() {
             Automated document and comment analysis
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData} className="h-8">
-          <RefreshCw className="size-3.5 mr-1.5" />
-          Refresh
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing} className="h-8">
+          <RefreshCw className={`size-3.5 mr-1.5 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Refreshing..." : "Refresh"}
         </Button>
       </div>
 
@@ -308,10 +365,16 @@ export default function AgentsPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Auto-process new data</p>
-                <p className="text-xs text-muted-foreground">Run agents when new posts are collected</p>
+                <p className="text-sm font-medium">Auto-process on ingestion</p>
+                <p className="text-xs text-muted-foreground">Run agents when new posts are collected from extension</p>
               </div>
-              <div className="size-2 rounded-full bg-green-500" title="Always enabled" />
+              <input
+                type="checkbox"
+                checked={forceRunOnIngestion}
+                onChange={handleForceRunToggle}
+                disabled={forceRunUpdating}
+                className="w-4 h-4 rounded border-border"
+              />
             </div>
             
             <div className="border-t border-border pt-4">
@@ -353,11 +416,28 @@ export default function AgentsPage() {
                       <option key={m} value={m}>{String(m).padStart(2, "0")}</option>
                     ))}
                   </select>
+                  {schedulerRunning ? (
+                    <span className="ml-2 text-[10px] text-green-500 flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Active
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-[10px] text-yellow-500 flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-yellow-500" />
+                      Inactive
+                    </span>
+                  )}
                 </div>
               )}
 
+              {schedulerEnabled && nextRun && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Next run: {new Date(nextRun).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
+                </p>
+              )}
+
               {lastRun && (
-                <p className="text-xs text-muted-foreground mt-3">
+                <p className="text-xs text-muted-foreground mt-1">
                   Last run: {new Date(lastRun).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })}
                 </p>
               )}

@@ -245,6 +245,11 @@ async def get_engagement_stats(
         DocumentModel.comments_count.isnot(None)
     ).scalar()
 
+    # Get unique commenters count
+    unique_commenters_count = db.query(func.count(func.distinct(PostComment.author_handle))).filter(
+        PostComment.author_handle.isnot(None)
+    ).scalar() or 0
+
     top_commenters = (
         db.query(
             PostComment.author_handle,
@@ -256,7 +261,7 @@ async def get_engagement_stats(
         .filter(PostComment.author_handle.isnot(None))
         .group_by(PostComment.author_handle, PostComment.author)
         .order_by(desc("comment_count"))
-        .limit(10)
+        .limit(15)
         .all()
     )
 
@@ -302,6 +307,7 @@ async def get_engagement_stats(
             "comments_per_post": round(float(avg_comments), 1) if avg_comments else 0,
         },
         "top_commenters": top_commenters_data,
+        "unique_commenters_count": unique_commenters_count,
         "platform_breakdown": platform_breakdown,
         "sentiment_distribution": {
             "total_processed": processed_total,

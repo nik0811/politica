@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { apiClient } from "@/lib/api-client"
-import { ImageIcon, Search, Loader2, ExternalLink, User } from "lucide-react"
+import { ImageIcon, Search, Loader2, ExternalLink, User, ChevronLeft, ChevronRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -23,13 +24,20 @@ export default function MediaPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [selectedItem, setSelectedItem] = useState<any | null>(null)
+  
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const pageSize = 20
 
   useEffect(() => {
     async function fetchMedia() {
       try {
         setLoading(true)
-        const data = await apiClient.getMediaGallery({ limit: 50 })
+        const skip = (page - 1) * pageSize
+        const data = await apiClient.getMediaGallery({ skip, limit: pageSize })
         setMediaItems(data.items || [])
+        setTotalCount(data.total || data.items?.length || 0)
       } catch (error) {
         console.error("Failed to fetch media:", error)
         setMediaItems([])
@@ -39,13 +47,15 @@ export default function MediaPage() {
     }
 
     fetchMedia()
-  }, [])
+  }, [page])
 
   const filtered = mediaItems.filter((item) =>
     item.title?.toLowerCase().includes(search.toLowerCase()) ||
     item.content?.toLowerCase().includes(search.toLowerCase()) ||
     item.author_handle?.toLowerCase().includes(search.toLowerCase())
   )
+
+  const totalPages = Math.ceil(totalCount / pageSize) || 1
 
   if (loading) {
     return (
@@ -64,7 +74,7 @@ export default function MediaPage() {
         </p>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
@@ -77,6 +87,29 @@ export default function MediaPage() {
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {filtered.filter((i) => i.has_screenshot).length} with screenshot
         </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1 || loading}
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <span className="text-xs text-muted-foreground min-w-[60px] text-center">
+            {page} / {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setPage(p => p + 1)}
+            disabled={mediaItems.length < pageSize || loading}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -158,6 +191,56 @@ export default function MediaPage() {
               </Card>
             ))}
           </div>
+
+          {/* Bottom Pagination */}
+          {filtered.length > 0 && (
+            <div className="flex items-center justify-between py-4">
+              <p className="text-xs text-muted-foreground">
+                Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, ((page - 1) * pageSize) + filtered.length)} of {totalCount} items
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1 || loading}
+                >
+                  First
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <span className="text-xs text-muted-foreground min-w-[80px] text-center">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={mediaItems.length < pageSize || loading}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-3 text-xs"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page >= totalPages || mediaItems.length < pageSize || loading}
+                >
+                  Last
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Lightbox */}
           {selectedItem && (
