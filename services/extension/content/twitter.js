@@ -165,9 +165,13 @@
         console.log(`[Twitter Scraper] Total replies extracted: ${replies.length}`)
         console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
         
-        // Send to service worker
+        // Get request ID from URL or generate one
+        const requestId = window.location.href.match(/status\/(\d+)/)?.[1] || `req_${Date.now()}`
+        
+        // Send to service worker with request ID
         chrome.runtime.sendMessage({
           type: 'TWEET_REPLIES_READY',
+          requestId,
           replies
         }).catch((err) => {
           console.error('[Twitter Scraper] Error sending replies:', err)
@@ -175,8 +179,10 @@
       } catch (err) {
         console.error('[Twitter Scraper] Error during extraction:', err)
         // Still send empty replies to avoid hanging
+        const requestId = window.location.href.match(/status\/(\d+)/)?.[1] || `req_${Date.now()}`
         chrome.runtime.sendMessage({
           type: 'TWEET_REPLIES_READY',
+          requestId,
           replies: []
         }).catch(() => {})
       }
