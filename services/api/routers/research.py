@@ -252,6 +252,13 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
             "id": doc.id,
             "title": doc.title,
             "platform": doc.platform,
+            "author": doc.author,
+            "author_handle": doc.author_handle,
+            "url": doc.url,
+            "published_at": doc.published_at.isoformat() if doc.published_at else None,
+            "sentiment": doc.sentiment,
+            "likes_count": doc.likes_count,
+            "comments_count": doc.comments_count,
         })
         context.append({"text": doc.content[:500], "source": doc.title})
 
@@ -309,11 +316,11 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
                 "model": None,
             }
 
-    # Build context string for LLM synthesis
-    doc_context = "\n\n".join([
-        f"Source: {c['source']}\n{c['text']}"
-        for c in context[:8]
-    ])
+    # Build context string for LLM synthesis — number each source for citation
+    numbered_sources = []
+    for i, c in enumerate(context[:8], start=1):
+        numbered_sources.append(f"[{i}] Source: {c['source']}\n{c['text']}")
+    doc_context = "\n\n".join(numbered_sources)
     
     # Add topic summary if available
     if topic_stats:
@@ -330,14 +337,15 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         try:
             web_results = _searxng_search(request.query, limit=5)
             if web_results:
-                for result in web_results:
+                web_num_start = len(context) + 1
+                for i, result in enumerate(web_results, start=web_num_start):
                     web_sources_added.append({
                         "type": "web",
                         "title": result["title"],
                         "url": result["url"],
                         "engine": result["engine"],
                     })
-                    web_context += f"\nWeb Source: {result['title']}\nURL: {result['url']}\n{result['content'][:300]}\n"
+                    web_context += f"\n[{i}] Web: {result['title']}\nURL: {result['url']}\n{result['content'][:300]}\n"
                 
                 sources.extend(web_sources_added)
                 if not doc_context.strip():
@@ -366,14 +374,20 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         )
         
         system_prompt = (
-            "You are an intelligent political research assistant with access to local data and internet search. "
+            "You are an intelligent political research assistant with access to local social media data and internet search. "
             f"{language_instruction}"
-            "Answer based on the provided sources and conversation context. Be concise, factual, and well-structured. "
-            "Use bullet points and headers for clarity. "
-            "If sources include web URLs, cite them. "
-            "If sources are from social media, reference the platform and author. "
-            "If the information is insufficient, say so clearly. "
-            "Remember previous messages in this conversation to provide contextual follow-up answers."
+            "IMPORTANT CITATION RULES:\n"
+            "- Every factual claim MUST be followed by a citation like [1], [2], etc.\n"
+            "- The numbers correspond to the numbered sources provided below.\n"
+            "- If a fact comes from multiple sources, cite all of them e.g. [1][3].\n"
+            "- Do NOT make up facts not supported by the provided sources.\n"
+            "- If sources are insufficient, say so clearly.\n\n"
+            "Format your response with:\n"
+            "- Clear headers for sections\n"
+            "- Bullet points for lists\n"
+            "- Bold for key facts\n"
+            "- Citation numbers inline after each fact e.g. 'The event happened in Goa [1]'\n"
+            "Remember previous messages in this conversation for contextual follow-up answers."
         )
         
         # Build full context
@@ -571,6 +585,43 @@ async def get_messages(conversation_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return messages
+
+
+class ConversationUpdate(BaseModel):
+    title: str
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationListResponse)
+async def update_conversation(
+    conversation_id: str,
+    request: ConversationUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update a conversation's title."""
+    conversation = (
+        db.query(ResearchConversation)
+        .filter(ResearchConversation.id == conversation_id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    conversation.title = request.title
+    conversation.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(conversation)
+
+    message_count = db.query(func.count()).select_from(ResearchMessage).filter(
+        ResearchMessage.conversation_id == conversation.id
+    ).scalar() or 0
+
+    return {
+        "id": conversation.id,
+        "title": conversation.title,
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+        "message_count": message_count,
+    }
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)

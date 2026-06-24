@@ -31,22 +31,47 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 def run_column_migrations():
-    """Add any missing columns to existing tables (safe to run on every startup)."""
+    """Add any missing columns to existing tables (safe to run on every startup).
+    
+    This is idempotent — columns are only added if they don't already exist.
+    Required for zero-downtime upgrades on existing servers where create_all
+    won't modify tables that already exist.
+    """
     from sqlalchemy import text, inspect
     migrations = [
-        ("documents", "screenshot_path", "VARCHAR"),
-        ("documents", "author_handle", "VARCHAR"),
-        ("documents", "collected_at", "TIMESTAMP"),
-        ("documents", "likes_count", "INTEGER DEFAULT 0"),
-        ("documents", "comments_count", "INTEGER DEFAULT 0"),
-        ("documents", "shares_count", "INTEGER DEFAULT 0"),
-        ("documents", "views_count", "INTEGER DEFAULT 0"),
-        ("documents", "reactions_count", "INTEGER DEFAULT 0"),
+        # ── documents ─────────────────────────────────────────────────────────
+        ("documents", "screenshot_path",   "VARCHAR"),
+        ("documents", "author_handle",     "VARCHAR"),
+        ("documents", "collected_at",      "TIMESTAMP DEFAULT NOW()"),
+        ("documents", "likes_count",       "INTEGER DEFAULT 0"),
+        ("documents", "comments_count",    "INTEGER DEFAULT 0"),
+        ("documents", "shares_count",      "INTEGER DEFAULT 0"),
+        ("documents", "views_count",       "INTEGER DEFAULT 0"),
+        ("documents", "reactions_count",   "INTEGER DEFAULT 0"),
         ("documents", "subscribers_count", "INTEGER DEFAULT 0"),
-        ("documents", "engagement_rate", "FLOAT"),
-        ("api_tokens", "description", "TEXT"),
-        ("api_tokens", "expires_at", "TIMESTAMP"),
+        ("documents", "engagement_rate",   "FLOAT"),
+        ("documents", "transcription",     "TEXT"),
+        ("documents", "last_updated_at",   "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+
+        # ── post_comments ─────────────────────────────────────────────────────
+        ("post_comments", "author_handle",    "VARCHAR"),
+        ("post_comments", "sentiment",        "FLOAT"),
+        ("post_comments", "sentiment_label",  "VARCHAR"),
+        ("post_comments", "topics",           "JSON DEFAULT '[]'::json"),
+        ("post_comments", "entities",         "JSON DEFAULT '[]'::json"),
+        ("post_comments", "processed_at",     "TIMESTAMP"),
+
+        # ── api_tokens ────────────────────────────────────────────────────────
+        ("api_tokens", "description",  "TEXT"),
+        ("api_tokens", "expires_at",   "TIMESTAMP"),
         ("api_tokens", "last_used_at", "TIMESTAMP"),
+
+        # ── collection_targets ────────────────────────────────────────────────
+        ("collection_targets", "from_date",              "TIMESTAMP"),
+        ("collection_targets", "to_date",                "TIMESTAMP"),
+        ("collection_targets", "include_comments",       "BOOLEAN DEFAULT true"),
+        ("collection_targets", "max_comments_per_post",  "INTEGER DEFAULT 50"),
+        ("collection_targets", "is_running",             "BOOLEAN DEFAULT false"),
     ]
     with engine.connect() as conn:
         inspector = inspect(engine)
@@ -86,6 +111,20 @@ async def lifespan(app: FastAPI):
         logger.info("BM25 search index initialized for RAG")
     except Exception as e:
         logger.warning(f"Failed to initialize search index: {e}")
+
+    # Preload Whisper model in background so first transcription is instant
+    try:
+        import threading
+        def _preload_whisper():
+            try:
+                from routers.ingestion import _get_whisper_model
+                _get_whisper_model()
+                logger.info("Whisper model preloaded and ready")
+            except Exception as e:
+                logger.warning(f"Whisper preload failed (will load on first request): {e}")
+        threading.Thread(target=_preload_whisper, daemon=True).start()
+    except Exception as e:
+        logger.warning(f"Could not start Whisper preload thread: {e}")
     
     yield
     

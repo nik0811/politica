@@ -148,6 +148,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true
     }
 
+    if (message.type === 'TRANSCRIBE_AUDIO') {
+      handleTranscribeAudio(message.audioBase64, message.documentId)
+        .then(res => {
+          console.log('[Service Worker] TRANSCRIBE_AUDIO success')
+          sendResponse(res)
+        })
+        .catch(err => {
+          console.error('[Service Worker] TRANSCRIBE_AUDIO error:', err)
+          sendResponse({ success: false, error: err.message })
+        })
+      return true
+    }
+
     console.warn('[Service Worker] Unknown message type:', message.type)
   } catch (err) {
     console.error('[Service Worker] Unexpected error in message handler:', err)
@@ -422,6 +435,28 @@ async function testConnection(apiUrl, apiToken) {
     console.error('[Service Worker] testConnection failed:', err)
     throw err
   }
+}
+
+// ── Video Audio Transcription ─────────────────────────────────────────────────
+
+async function handleTranscribeAudio(audioBase64, documentId) {
+  const { apiUrl, apiToken } = await getApiConfig()
+
+  const response = await fetch(`${apiUrl}/api/ingest/transcribe-audio`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiToken}`
+    },
+    body: JSON.stringify({ audio_base64: audioBase64, document_id: documentId })
+  })
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Transcribe API error ${response.status}: ${text}`)
+  }
+
+  return response.json()
 }
 
 async function handleExtractTweetReplies(tweetUrl, sourceTabId) {

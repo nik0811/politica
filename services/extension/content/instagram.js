@@ -152,13 +152,25 @@
     // Media type
     var mediaType = detectMediaType()
 
-    // Expand and collect all comments if requested
+    // Start recording video audio immediately if this is a video/reel
+    // Recording runs in background while we scrape comments below
+    var articleEl = document.querySelector('article') || document.querySelector('div[role="dialog"]')
+    var videoEl = mediaType === 'video' ? (articleEl ? articleEl.querySelector('video') : document.querySelector('video')) : null
+    var videoRecorder = videoEl ? window.PoliticaCollector.startVideoRecording(videoEl) : null
+
+    // Expand and collect all comments — audio records during this whole time
     var comments = []
     if (expandComments) {
       await expandAllComments()
       comments = scrapeAllComments()
     } else {
       comments = scrapeAllComments()
+    }
+
+    // Stop recording and get audio before saving (before navigating away)
+    var capturedAudio = null
+    if (videoRecorder) {
+      try { capturedAudio = await videoRecorder.stop() } catch (e) { /* non-critical */ }
     }
 
     var doc = {
@@ -187,6 +199,13 @@
       if (result && result.id) {
         // Capture screenshot to visually prove the post was collected
         captureScreenshot(result.id)
+        // Fire transcription in background after post is saved
+        // — doesn't block scraper, links audio to the correct doc ID
+        if (capturedAudio) {
+          window.PoliticaCollector.transcribeAudio(capturedAudio, result.id)
+            .then(function (t) { t && console.log('[Instagram Scraper] Transcription saved for', result.id) })
+            .catch(function () {})
+        }
       }
       if (!options.silent) {
         window.PoliticaCollector.showNotification(

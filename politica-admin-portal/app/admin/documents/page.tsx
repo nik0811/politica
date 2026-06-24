@@ -29,6 +29,7 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
+  Mic,
 } from "lucide-react"
 import { apiClient, type Document, type PostComment } from "@/lib/api-client"
 
@@ -163,6 +164,22 @@ function DocumentDrawer({
                   <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Post Content</p>
                   <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">{doc.content}</p>
                 </div>
+
+                {/* Video Transcription */}
+                {doc.transcription && (
+                  <>
+                    <Separator />
+                    <div>
+                      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                        <Mic className="size-3" />
+                        Video Transcription
+                      </p>
+                      <p className="text-sm leading-relaxed text-foreground/80 whitespace-pre-wrap bg-muted/40 rounded-md px-3 py-2.5 border border-border/50">
+                        {doc.transcription}
+                      </p>
+                    </div>
+                  </>
+                )}
 
                 {/* Topics & entities */}
                 {((doc.topics?.length ?? 0) > 0 || (doc.entities?.length ?? 0) > 0) && (
@@ -446,7 +463,14 @@ export default function DocumentsPage() {
                       </td>
                       {/* Content preview */}
                       <td className="px-4 py-3 max-w-[280px]">
-                        <p className="truncate text-foreground/80">{preview}</p>
+                        <div className="flex items-center gap-1.5">
+                          {doc.transcription && (
+                            <span title="Has video transcription">
+                              <Mic className="size-3 shrink-0 text-[var(--chart-1)]" />
+                            </span>
+                          )}
+                          <p className="truncate text-foreground/80">{preview}</p>
+                        </div>
                       </td>
                       {/* Engagement */}
                       <td className="px-4 py-3 whitespace-nowrap">

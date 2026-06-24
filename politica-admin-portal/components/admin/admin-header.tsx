@@ -53,8 +53,22 @@ export function AdminHeader() {
   const { username, logout } = useAuth()
   const { theme, setTheme } = useTheme()
   const router = useRouter()
-  const title = PAGE_TITLES[pathname] ?? "Admin"
+  const [pageTitles, setPageTitles] = useState(PAGE_TITLES)
+  const title = pageTitles[pathname] ?? "Admin"
   const [isOnline, setIsOnline] = useState(true)
+
+  useEffect(() => {
+    // Load custom branding for overrideable titles
+    import("@/lib/api-client").then(({ apiClient }) => {
+      apiClient.getSettingsByCategory("branding")
+        .then((s: any) => {
+          if (s?.research_assistant_name?.value) {
+            setPageTitles(prev => ({ ...prev, "/admin/research": s.research_assistant_name.value }))
+          }
+        })
+        .catch(() => {})
+    })
+  }, [])
 
   useEffect(() => {
     setIsOnline(navigator.onLine)

@@ -75,6 +75,10 @@ def _build_prompt(doc: Document, db: Session, context_docs: list = None) -> str:
         parts.append(f"Handle: {doc.author_handle}")
     parts.append(f"\nContent:\n{doc.content[:3000]}")
 
+    # Include video transcription when available — this is the actual spoken words from the video
+    if getattr(doc, 'transcription', None):
+        parts.append(f"\nVideo Transcription (spoken audio from the video):\n{doc.transcription[:5000]}")
+
     # Include engagement metrics
     engagement = []
     if doc.likes_count:   engagement.append(f"likes={doc.likes_count}")

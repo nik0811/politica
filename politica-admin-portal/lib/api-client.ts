@@ -43,6 +43,9 @@ export interface Document {
   created_at: string
   updated_at: string
 
+  // Video transcription
+  transcription?: string | null
+
   // Engagement metrics
   likes_count?: number
   comments_count?: number
@@ -452,6 +455,13 @@ class APIClient {
   async deleteConversation(conversationId: string): Promise<void> {
     return this.request<void>(`/api/research/conversations/${conversationId}`, {
       method: "DELETE",
+    })
+  }
+
+  async updateConversation(conversationId: string, title: string): Promise<any> {
+    return this.request<any>(`/api/research/conversations/${conversationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
     })
   }
 

@@ -54,6 +54,7 @@ class IngestPostBase(BaseModel):
     engagement_rate: Optional[float] = None
     published_at: Optional[datetime] = None
     comments: Optional[List[CommentData]] = None
+    transcription: Optional[str] = None
 
 
 class IngestInstagramPost(IngestPostBase):
@@ -194,6 +195,7 @@ def _create_document(
         views_count=data.views_count,
         reactions_count=data.reactions_count,
         engagement_rate=data.engagement_rate,
+        transcription=data.transcription,
     )
     db.add(doc)
 
@@ -284,6 +286,8 @@ async def ingest_instagram(data: IngestInstagramPost, db: Session = Depends(get_
             
             existing_post.last_updated_at = datetime.utcnow()
             existing_post.comments_count = data.comments_count
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             db.refresh(existing_post)
             
@@ -296,6 +300,8 @@ async def ingest_instagram(data: IngestInstagramPost, db: Session = Depends(get_
             )
         else:
             existing_post.last_updated_at = datetime.utcnow()
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             
             return IngestResponse(
@@ -348,6 +354,8 @@ async def ingest_twitter(data: IngestTwitterPost, db: Session = Depends(get_db))
             
             existing_post.last_updated_at = datetime.utcnow()
             existing_post.comments_count = data.comments_count
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             db.refresh(existing_post)
             
@@ -360,6 +368,8 @@ async def ingest_twitter(data: IngestTwitterPost, db: Session = Depends(get_db))
             )
         else:
             existing_post.last_updated_at = datetime.utcnow()
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             
             return IngestResponse(
@@ -412,6 +422,8 @@ async def ingest_facebook(data: IngestFacebookPost, db: Session = Depends(get_db
             
             existing_post.last_updated_at = datetime.utcnow()
             existing_post.comments_count = data.comments_count
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             db.refresh(existing_post)
             
@@ -424,6 +436,8 @@ async def ingest_facebook(data: IngestFacebookPost, db: Session = Depends(get_db
             )
         else:
             existing_post.last_updated_at = datetime.utcnow()
+            if data.transcription and not existing_post.transcription:
+                existing_post.transcription = data.transcription
             db.commit()
             
             return IngestResponse(
@@ -557,6 +571,108 @@ async def serve_screenshot(document_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Screenshot not found")
 
     return FileResponse(document.screenshot_path, media_type="image/jpeg")
+
+
+# ── Video Audio Transcription ─────────────────────────────────────────────────
+
+class TranscribeAudioRequest(BaseModel):
+    audio_base64: str
+    document_id: Optional[str] = None
+
+
+@router.post("/transcribe-audio")
+async def transcribe_audio(data: TranscribeAudioRequest, db: Session = Depends(get_db)):
+    """
+    Receive a base64-encoded WebM audio clip from the browser extension,
+    transcribe it locally using faster-whisper (no S3, no external API),
+    and optionally attach the transcription text to a document record.
+    Supports Hindi and English with automatic language detection.
+    """
+    import tempfile
+    import threading
+
+    try:
+        audio_bytes = base64.b64decode(data.audio_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 audio data")
+
+    if len(audio_bytes) < 500:
+        raise HTTPException(status_code=400, detail="Audio clip too short to transcribe")
+
+    tmp_path = None
+    try:
+        # Write audio to a temp file
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        # Load the Whisper model (cached after first load — lazy singleton)
+        from faster_whisper import WhisperModel
+        model = _get_whisper_model()
+
+        # Transcribe — auto-detects language, supports Hindi + English
+        segments, info = model.transcribe(
+            tmp_path,
+            beam_size=5,
+            language=None,        # auto-detect
+            task="transcribe",
+            vad_filter=True,      # skip silent segments
+        )
+        transcription_text = " ".join(seg.text.strip() for seg in segments).strip()
+
+        logger.info(
+            f"Transcription complete: lang={info.language} ({info.language_probability:.2f}), "
+            f"length={len(transcription_text)}, doc_id={data.document_id}"
+        )
+        if transcription_text:
+            logger.info(f"Transcription text: {transcription_text[:300]}")
+
+        # Attach to document record if provided
+        if transcription_text and data.document_id:
+            doc = db.query(Document).filter(Document.id == data.document_id).first()
+            if doc is None:
+                logger.warning(f"Transcription: document {data.document_id} not found in DB — skipping save")
+            elif doc.transcription:
+                logger.info(f"Transcription: document {data.document_id} already has transcription — overwriting with new one")
+                doc.transcription = transcription_text
+                db.commit()
+                logger.info(f"Transcription updated for document {data.document_id}")
+            else:
+                doc.transcription = transcription_text
+                db.commit()
+                logger.info(f"Transcription saved to document {data.document_id}")
+        elif not data.document_id:
+            logger.warning("Transcription: no document_id provided — transcription not linked to any document")
+
+        return {"success": True, "transcription": transcription_text}
+
+    except Exception as e:
+        logger.error(f"Transcription error: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+# Lazy singleton for the Whisper model — loaded once, reused across requests
+_whisper_model = None
+_whisper_lock = None
+
+def _get_whisper_model():
+    global _whisper_model, _whisper_lock
+    import threading
+    if _whisper_lock is None:
+        _whisper_lock = threading.Lock()
+    with _whisper_lock:
+        if _whisper_model is None:
+            from faster_whisper import WhisperModel
+            logger.info("Loading Whisper 'small' model for transcription (first load only)...")
+            _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
+            logger.info("Whisper model loaded.")
+    return _whisper_model
 
 
 # ── Stats & Logs (used by admin dashboard) ──────────────────────────────────

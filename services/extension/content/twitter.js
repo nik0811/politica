@@ -376,7 +376,11 @@
           if (tweetUrl) {
             // Extract tweet data from profile page (basic info)
             const tweetData = extractTweetData(tweet, url)
-            
+
+            // Start recording video audio immediately (tweet may have a video)
+            const tweetVideoEl = tweet.querySelector('video')
+            const videoRecorder = tweetVideoEl ? window.PoliticaCollector.startVideoRecording(tweetVideoEl) : null
+
             // Get reply count from the tweet element
             const replyBtn = tweet.querySelector('[data-testid="reply"]')
             const replyText = replyBtn?.textContent?.trim() || '0'
@@ -420,9 +424,21 @@
               replies_count: r.retweets || 0
             }))
             tweetData.metadata = { retweet_count: tweetData.metadata?.retweet_count, view_count: tweetData.metadata?.view_count }
-            
+
+            // Stop recording and get audio (captured while fetching replies)
+            let capturedAudio = null
+            if (videoRecorder) {
+              try { capturedAudio = await videoRecorder.stop() } catch (e) { /* non-critical */ }
+            }
+
             // Send to API
-            await sendToTwitterApi(tweetData)
+            const apiResult = await sendToTwitterApi(tweetData)
+            // Fire transcription in background after post saved
+            if (capturedAudio && apiResult && apiResult.id) {
+              window.PoliticaCollector.transcribeAudio(capturedAudio, apiResult.id)
+                .then(t => t && console.log(`[Twitter Scraper] Transcription saved for ${apiResult.id}`))
+                .catch(() => {})
+            }
             saved++
             scraperState.postsCollected = saved
             scraperState.commentsCollected += replies.length
@@ -491,7 +507,11 @@
       return { error: 'No tweet found on this page' }
     }
 
-    // Expand replies multiple times with scrolling
+    // Start video recording immediately if tweet has a video
+    const tweetVideoEl = primaryArticle.querySelector('video')
+    const videoRecorder = tweetVideoEl ? window.PoliticaCollector.startVideoRecording(tweetVideoEl) : null
+
+    // Expand replies multiple times with scrolling — audio records during this
     for (let i = 0; i < 8 && scraperState.isRunning; i++) {
       expandAllReplies()
       window.scrollTo(0, document.body.scrollHeight)
@@ -517,11 +537,23 @@
     tweet.comments_count = replies.length
     tweet.metadata = { ...tweet.metadata, replies }
 
+    // Stop recording and get audio before saving
+    let capturedAudio = null
+    if (videoRecorder) {
+      try { capturedAudio = await videoRecorder.stop() } catch (e) { /* non-critical */ }
+    }
+
     scraperState.postsCollected = 1
     scraperState.commentsCollected = replies.length
 
     try {
-      await sendToTwitterApi(tweet)
+      const apiResult = await sendToTwitterApi(tweet)
+      // Fire transcription in background after post is saved
+      if (capturedAudio && apiResult && apiResult.id) {
+        window.PoliticaCollector.transcribeAudio(capturedAudio, apiResult.id)
+          .then(t => t && console.log(`[Twitter Scraper] Transcription saved for ${apiResult.id}`))
+          .catch(() => {})
+      }
       window.PoliticaCollector.showNotification(
         `Saved tweet with ${replies.length} replies`, 'success'
       )

@@ -277,6 +277,171 @@ window.PoliticaCollector = {
   },
 
   /**
+   * Start recording audio from a playing <video> element immediately.
+   * Returns a recorder handle. Call handle.stop() to get base64 audio.
+   * Always returns null on any failure — never throws.
+   */
+  startVideoRecording(videoEl) {
+    try {
+      if (!videoEl || typeof videoEl.captureStream !== 'function') return null
+
+      const stream = videoEl.captureStream()
+      const audioTracks = stream.getAudioTracks()
+      if (!audioTracks || audioTracks.length === 0) {
+        console.log('[Politica] startVideoRecording: no audio track')
+        return null
+      }
+
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg']
+        .find(t => MediaRecorder.isTypeSupported(t)) || ''
+
+      const chunks = []
+      let recorder
+      try {
+        recorder = new MediaRecorder(new MediaStream(audioTracks), mimeType ? { mimeType } : {})
+      } catch (e) {
+        console.warn('[Politica] startVideoRecording: MediaRecorder init failed', e)
+        return null
+      }
+
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data) }
+      recorder.start(500)
+
+      console.log('[Politica] startVideoRecording: started (video duration:', videoEl.duration, 's)')
+
+      return {
+        stop: () => new Promise((resolve) => {
+          try {
+            if (!recorder || recorder.state === 'inactive') { resolve(null); return }
+
+            // Safety timeout — if onstop never fires, resolve null after 5 seconds
+            const safetyTimer = setTimeout(() => {
+              console.warn('[Politica] stopVideoRecording: onstop timeout — skipping audio')
+              resolve(null)
+            }, 5000)
+
+            recorder.onstop = async () => {
+              clearTimeout(safetyTimer)
+              try { audioTracks.forEach(t => t.stop()) } catch (e) { /* ignore */ }
+              try {
+                const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
+                if (blob.size < 500) { resolve(null); return }
+                const buf = await blob.arrayBuffer()
+                const bytes = new Uint8Array(buf)
+                let bin = ''
+                for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i])
+                console.log('[Politica] stopVideoRecording: captured', Math.round(blob.size / 1024), 'KB')
+                resolve(btoa(bin))
+              } catch (err) {
+                console.warn('[Politica] stopVideoRecording: conversion failed', err)
+                resolve(null)
+              }
+            }
+
+            recorder.onerror = () => { clearTimeout(safetyTimer); resolve(null) }
+
+            try { recorder.stop() } catch (e) { clearTimeout(safetyTimer); resolve(null) }
+          } catch (e) {
+            resolve(null)
+          }
+        })
+      }
+    } catch (err) {
+      console.warn('[Politica] startVideoRecording failed (non-critical):', err.message)
+      return null
+    }
+  },
+
+  /**
+   * @deprecated Use startVideoRecording + stop() instead.
+   * Kept for compatibility — capture full video audio (blocking).
+   */
+  async captureVideoAudio(videoEl, maxMs) {
+    const handle = window.PoliticaCollector.startVideoRecording(videoEl)
+    if (!handle) return null
+    const MAX_CAPTURE_MS = maxMs || 120000
+    const captureDurationMs = Math.min(
+      isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration * 1000 : 60000,
+      MAX_CAPTURE_MS
+    )
+    await new Promise(r => setTimeout(r, captureDurationMs))
+    return handle.stop()
+  },
+
+  /**
+   * Request backend transcription of a base64 audio clip.
+   * Sends via the service worker to avoid CORS issues.
+   * Returns transcription text or null on failure.
+   */
+  async transcribeAudio(audioBase64, documentId) {
+    if (!audioBase64) return null
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'TRANSCRIBE_AUDIO', audioBase64, documentId: documentId || null },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[Politica] transcribeAudio: message error', chrome.runtime.lastError.message)
+            resolve(null)
+            return
+          }
+          if (response && response.success && response.transcription) {
+            console.log('[Politica] transcribeAudio: got transcription, length:', response.transcription.length)
+            resolve(response.transcription)
+          } else {
+            console.log('[Politica] transcribeAudio: no transcription returned', response?.error)
+            resolve(null)
+          }
+        }
+      )
+    })
+  },
+
+  /**
+   * Fire-and-forget transcription: starts capturing + transcription in the background
+   * WITHOUT blocking the scraper. The transcription result is saved to the document
+   * server-side once complete. Pass the document ID returned from the ingest API.
+   *
+   * Use this after a post is already saved so the scraper can keep moving.
+   * NOTE: Only use when the video will keep playing after the call (not for reel scrapers
+   * that navigate away immediately). Prefer the start/stop API for reel scrapers.
+   */
+  scheduleTranscription(videoEl, documentId) {
+    if (!videoEl || !documentId) return
+    ;(async () => {
+      try {
+        const handle = window.PoliticaCollector.startVideoRecording(videoEl)
+        if (!handle) return
+        // Record for up to 2 minutes or until video ends
+        const captureDurationMs = Math.min(
+          isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration * 1000 : 60000,
+          120000
+        )
+        await new Promise(r => setTimeout(r, captureDurationMs))
+        const audioBase64 = await handle.stop()
+        if (!audioBase64) return
+        await window.PoliticaCollector.transcribeAudio(audioBase64, documentId)
+      } catch (err) {
+        console.warn('[Politica] scheduleTranscription failed (non-critical):', err.message)
+      }
+    })()
+  },
+
+  /**
+   * Blocking pipeline for when transcription must happen BEFORE saving.
+   * Pass a pre-started recorder handle from startVideoRecording() for best results.
+   */
+  async captureAndTranscribe(videoEl, documentId, maxMs) {
+    try {
+      const audioBase64 = await window.PoliticaCollector.captureVideoAudio(videoEl, maxMs)
+      if (!audioBase64) return null
+      return await window.PoliticaCollector.transcribeAudio(audioBase64, documentId)
+    } catch (err) {
+      console.warn('[Politica] captureAndTranscribe failed (non-critical):', err.message)
+      return null
+    }
+  },
+
+  /**
    * Process a server guidance response and execute the suggested action.
    * Returns true if an action was taken successfully.
    */

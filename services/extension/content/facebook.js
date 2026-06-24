@@ -106,6 +106,8 @@
     })
   }
 
+
+
   // ── Page scraper ─────────────────────────────────────────────────────────────
   async function collectFacebookPage() {
     const url = window.location.href
@@ -659,6 +661,10 @@
         // Wait for content to load
         await new Promise(r => setTimeout(r, 1500))
 
+        // Start recording video audio immediately while reel is playing
+        const reelVideoEl = document.querySelector('video')
+        const videoRecorder = reelVideoEl ? window.PoliticaCollector.startVideoRecording(reelVideoEl) : null
+
         // Open comment panel only once (it stays open between reels)
         if (!commentPanelOpened) {
           await openReelCommentPanel()
@@ -669,22 +675,38 @@
         // Wait for comments to load for this reel
         await new Promise(r => setTimeout(r, 800))
 
-        // Scroll and read ALL comments for this reel (wait for completion)
+        // Scroll and read ALL comments — audio records during this whole time
         console.log('[FB Reel] Reading comments for reel:', reelId)
         const comments = await scrollAndReadComments()
         console.log('[FB Reel] Finished reading', comments.length, 'comments')
+
+        // Stop recording now (before navigating away) — captures audio from THIS reel
+        let capturedAudio = null
+        if (videoRecorder) {
+          try { capturedAudio = await videoRecorder.stop() } catch (e) { /* non-critical */ }
+        }
         
         // Get reel metadata (caption, author, engagement)
         const reelData = await extractReelMetadata(comments)
         
         if (reelData) {
+          delete reelData._videoEl   // don't send DOM element to API
+
           try {
-            await sendToFacebookApi(reelData)
+            const apiResult = await sendToFacebookApi(reelData)
             saved++
             totalComments += comments.length
             scraperState.postsCollected = saved
             scraperState.commentsCollected = totalComments
-            
+
+            // Fire transcription in background after post is saved
+            // — doesn't block scraper, links audio to the correct doc ID
+            if (capturedAudio && apiResult && apiResult.id) {
+              window.PoliticaCollector.transcribeAudio(capturedAudio, apiResult.id)
+                .then(t => t && console.log(`[FB Reel] Transcription saved for ${apiResult.id}`))
+                .catch(() => {})
+            }
+
             // Show notification for each reel
             window.PoliticaCollector.showNotification(
               `Reel ${saved}/${maxReels}: ${reelData.likes_count || 0} likes, ${comments.length} comments`,
@@ -1050,7 +1072,8 @@
       comments_count: comments.length || commentsCount,
       shares_count: sharesCount,
       comments: comments,
-      metadata: { content_type: 'reel', shares_count: sharesCount }
+      metadata: { content_type: 'reel', shares_count: sharesCount },
+      _videoEl: video    // pass element reference so caller can schedule transcription
     }
   }
 

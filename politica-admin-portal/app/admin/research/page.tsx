@@ -21,9 +21,12 @@ import {
   X,
   Check,
   ChevronRight,
+  Pencil,
+  ExternalLink,
 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 interface Message {
   id: string
@@ -41,6 +44,78 @@ interface Conversation {
   message_count: number
 }
 
+const PLATFORM_COLOR: Record<string, string> = {
+  instagram: "bg-pink-500/10 text-pink-500",
+  twitter:   "bg-sky-500/10 text-sky-500",
+  facebook:  "bg-blue-500/10 text-blue-500",
+  web:       "bg-muted text-muted-foreground",
+}
+
+function SourcesPanel({ sources }: { sources: any[] }) {
+  const [open, setOpen] = useState(false)
+  const docSources = sources.filter((s) => s.type === "document" || s.type === "web")
+  if (docSources.length === 0) return null
+
+  return (
+    <div className="mt-2 px-1">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Search className="size-3" />
+        <span>{docSources.length} source{docSources.length !== 1 ? "s" : ""}</span>
+        <ChevronRight className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {docSources.map((s, i) => (
+            <div key={s.id || i} className="flex items-start gap-2 rounded-lg border border-border/60 bg-background/60 px-3 py-2">
+              <span className="text-[10px] font-bold text-muted-foreground mt-0.5 w-4 shrink-0">[{i + 1}]</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                  {s.platform && (
+                    <span className={`text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded ${PLATFORM_COLOR[s.platform] ?? PLATFORM_COLOR.web}`}>
+                      {s.platform}
+                    </span>
+                  )}
+                  {s.sentiment != null && (
+                    <span className={`text-[10px] font-medium ${s.sentiment > 0.3 ? "text-green-500" : s.sentiment < -0.3 ? "text-red-500" : "text-muted-foreground"}`}>
+                      {s.sentiment > 0 ? `+${s.sentiment.toFixed(2)}` : s.sentiment.toFixed(2)}
+                    </span>
+                  )}
+                  {s.published_at && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(s.published_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs font-medium text-foreground/90 leading-snug line-clamp-2">{s.title}</p>
+                {(s.author || s.author_handle) && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {s.author || ""}{s.author_handle ? ` @${s.author_handle}` : ""}
+                  </p>
+                )}
+                {s.url && (
+                  <a
+                    href={s.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-primary hover:underline mt-0.5 flex items-center gap-0.5"
+                  >
+                    <ExternalLink className="size-2.5" />
+                    Verify source
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ResearchPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
@@ -55,6 +130,11 @@ export default function ResearchPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Conversation rename state
+  const [editingConvId, setEditingConvId] = useState<string | null>(null)
+  const [convTitleDraft, setConvTitleDraft] = useState("")
+  const convTitleInputRef = useRef<HTMLInputElement>(null)
+
   useEffect(() => {
     loadConversations()
   }, [])
@@ -63,7 +143,7 @@ export default function ResearchPage() {
     if (currentConversation) {
       loadMessages(currentConversation.id)
     }
-  }, [currentConversation])
+  }, [currentConversation?.id])
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -118,6 +198,30 @@ export default function ResearchPage() {
     } catch (error) {
       console.error("Failed to delete:", error)
     }
+  }
+
+  function startEditingConv(conv: Conversation, e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditingConvId(conv.id)
+    setConvTitleDraft(conv.title)
+    setTimeout(() => convTitleInputRef.current?.select(), 0)
+  }
+
+  async function saveConvTitle() {
+    if (!editingConvId) return
+    const trimmed = convTitleDraft.trim()
+    const conv = conversations.find(c => c.id === editingConvId)
+    if (!trimmed || trimmed === conv?.title) { setEditingConvId(null); return }
+    try {
+      const updated = await apiClient.updateConversation(editingConvId, trimmed)
+      setConversations(prev => prev.map(c => c.id === editingConvId ? { ...c, title: trimmed } : c))
+      if (currentConversation?.id === editingConvId) {
+        setCurrentConversation(prev => prev ? { ...prev, title: trimmed } : null)
+      }
+    } catch (error) {
+      console.error("Failed to rename:", error)
+    }
+    setEditingConvId(null)
   }
 
   const [loadingStage, setLoadingStage] = useState<string>("")
@@ -287,7 +391,11 @@ export default function ResearchPage() {
               {conversations.map((conv) => (
                 <div
                   key={conv.id}
-                  onClick={() => setCurrentConversation(conv)}
+                  onClick={() => {
+                    if (editingConvId !== conv.id) {
+                      setCurrentConversation(conv)
+                    }
+                  }}
                   className={`group flex items-center gap-2 px-3 py-2.5 rounded-md cursor-pointer transition-all ${
                     currentConversation?.id === conv.id
                       ? "bg-primary/10 text-primary"
@@ -296,20 +404,52 @@ export default function ResearchPage() {
                 >
                   <MessageSquare className="size-3.5 shrink-0 opacity-60" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm truncate font-medium">{conv.title}</p>
+                    {editingConvId === conv.id ? (
+                      <input
+                        ref={convTitleInputRef}
+                        value={convTitleDraft}
+                        onChange={(e) => setConvTitleDraft(e.target.value)}
+                        onBlur={saveConvTitle}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveConvTitle()
+                          if (e.key === "Escape") setEditingConvId(null)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sm font-medium bg-transparent border-b border-primary outline-none w-full"
+                        autoFocus
+                      />
+                    ) : (
+                      <p
+                        className="text-sm truncate font-medium"
+                        onDoubleClick={(e) => startEditingConv(conv, e)}
+                        title="Double-click to rename"
+                      >
+                        {conv.title}
+                      </p>
+                    )}
                     <p className="text-[11px] text-muted-foreground mt-0.5">
                       {new Date(conv.updated_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                     </p>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      deleteConversation(conv.id)
-                    }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => startEditingConv(conv, e)}
+                      className="text-muted-foreground hover:text-foreground"
+                      title="Rename"
+                    >
+                      <Pencil className="size-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteConversation(conv.id)
+                      }}
+                      className="text-muted-foreground hover:text-destructive"
+                      title="Delete"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -326,9 +466,11 @@ export default function ResearchPage() {
               <Brain className="size-4 text-primary" />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-foreground">Research Assistant</h1>
+              <h1 className="text-base font-semibold text-foreground">
+                {currentConversation ? currentConversation.title : "Research Assistant"}
+              </h1>
               <p className="text-xs text-muted-foreground">
-                {currentConversation ? currentConversation.title : "Ask questions about your collected data"}
+                {currentConversation ? "Research Session" : "Ask questions about your collected data"}
               </p>
             </div>
           </div>
@@ -382,6 +524,7 @@ export default function ResearchPage() {
                       <div className="text-sm leading-relaxed">
                         {msg.sender === "assistant" ? (
                           <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
                             components={{
                               p: (props) => <p className="mb-2 last:mb-0" {...props} />,
                               ul: (props) => <ul className="list-disc list-inside mb-2 last:mb-0 space-y-1" {...props} />,
@@ -392,6 +535,16 @@ export default function ResearchPage() {
                               blockquote: (props) => <blockquote className="border-l-2 border-primary/30 pl-3 italic text-muted-foreground" {...props} />,
                               a: (props) => <a className="text-primary hover:underline" {...props} />,
                               strong: (props) => <strong className="font-semibold" {...props} />,
+                              table: (props) => (
+                                <div className="overflow-x-auto my-3">
+                                  <table className="w-full text-xs border-collapse" {...props} />
+                                </div>
+                              ),
+                              thead: (props) => <thead className="bg-muted/60" {...props} />,
+                              tbody: (props) => <tbody {...props} />,
+                              tr: (props) => <tr className="border-b border-border last:border-0" {...props} />,
+                              th: (props) => <th className="text-left px-3 py-2 font-semibold text-foreground whitespace-nowrap border-b border-border" {...props} />,
+                              td: (props) => <td className="px-3 py-2 text-foreground/80 align-top" {...props} />,
                             }}
                           >
                             {msg.content}
@@ -406,6 +559,11 @@ export default function ResearchPage() {
                     <span className="text-[10px] text-muted-foreground mt-1 px-1">
                       {formatTime(msg.timestamp)}
                     </span>
+
+                    {/* Sources panel */}
+                    {msg.sender === "assistant" && msg.sources && msg.sources.length > 0 && (
+                      <SourcesPanel sources={msg.sources} />
+                    )}
 
                     {/* Feedback */}
                     {msg.sender === "assistant" && !msg.id.startsWith("error_") && (

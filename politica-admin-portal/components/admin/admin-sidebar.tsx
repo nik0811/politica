@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, createContext, useContext } from "react"
+import { useState, useEffect, createContext, useContext } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -124,6 +124,27 @@ function NavItem({
 export function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
+  const [dynamicNavGroups, setDynamicNavGroups] = useState(navGroups)
+
+  useEffect(() => {
+    import("@/lib/api-client").then(({ apiClient }) => {
+      apiClient.getSettingsByCategory("branding")
+        .then((s: any) => {
+          if (s?.research_assistant_name?.value) {
+            const customName = s.research_assistant_name.value
+            setDynamicNavGroups(prev =>
+              prev.map(group => ({
+                ...group,
+                items: group.items.map(item =>
+                  item.href === "/admin/research" ? { ...item, title: customName } : item
+                ),
+              }))
+            )
+          }
+        })
+        .catch(() => {})
+    })
+  }, [])
 
   return (
     <SidebarCollapseContext.Provider value={{ collapsed, toggle: () => setCollapsed((p) => !p) }}>
@@ -156,7 +177,7 @@ export function AdminSidebar() {
         {/* ── Nav groups ── */}
         <ScrollArea className="flex-1 overflow-hidden">
           <nav className={cn("flex flex-col gap-4 py-3 pb-4", collapsed ? "px-[10px]" : "px-2")}>
-            {navGroups.map((group, gi) => (
+            {dynamicNavGroups.map((group, gi) => (
               <div key={group.label} className="flex flex-col gap-0.5">
                 {!collapsed ? (
                   <p className="mb-0.5 px-2.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground/40 select-none">
