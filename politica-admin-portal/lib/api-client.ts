@@ -438,7 +438,7 @@ class APIClient {
     })
   }
 
-  async searchResearch(params: { query: string; max_results?: number }): Promise<any> {
+  async searchResearch(params: { query: string; max_results?: number; conversation_id?: string }): Promise<any> {
     return this.request<any>("/api/research/query", {
       method: "POST",
       body: JSON.stringify(params),

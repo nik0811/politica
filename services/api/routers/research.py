@@ -66,6 +66,7 @@ def _searxng_search(query: str, limit: int = 5) -> List[dict]:
 class ResearchQuery(BaseModel):
     query: str
     max_results: Optional[int] = 5
+    conversation_id: Optional[str] = None  # For conversation memory
 
 
 class ResearchResponse(BaseModel):
@@ -157,6 +158,22 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
     """Research assistant: semantic search via Qdrant with SQL keyword fallback."""
     search_engine = "keyword"
     semantic_doc_ids: List[str] = []
+
+    # Load conversation history for memory/context
+    conversation_history = []
+    if request.conversation_id:
+        prev_messages = (
+            db.query(ResearchMessage)
+            .filter(ResearchMessage.conversation_id == request.conversation_id)
+            .order_by(ResearchMessage.timestamp.asc())
+            .limit(20)  # Last 20 messages for context
+            .all()
+        )
+        for msg in prev_messages:
+            conversation_history.append({
+                "role": "user" if msg.sender == "user" else "assistant",
+                "content": msg.content[:500],  # Truncate to save tokens
+            })
 
     # Check if query is about topics
     query_lower = request.query.lower()
@@ -351,11 +368,12 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         system_prompt = (
             "You are an intelligent political research assistant with access to local data and internet search. "
             f"{language_instruction}"
-            "Answer based on the provided sources. Be concise, factual, and well-structured. "
+            "Answer based on the provided sources and conversation context. Be concise, factual, and well-structured. "
             "Use bullet points and headers for clarity. "
             "If sources include web URLs, cite them. "
             "If sources are from social media, reference the platform and author. "
-            "If the information is insufficient, say so clearly."
+            "If the information is insufficient, say so clearly. "
+            "Remember previous messages in this conversation to provide contextual follow-up answers."
         )
         
         # Build full context
@@ -363,19 +381,27 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         if web_context:
             full_context += f"\n\n--- Internet Search Results ---\n{web_context}"
         
+        # Build messages with conversation history for memory
+        llm_messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history (last 10 messages for context window management)
+        if conversation_history:
+            for hist_msg in conversation_history[-10:]:
+                llm_messages.append(hist_msg)
+        
+        # Add current query with sources
+        llm_messages.append({
+            "role": "user",
+            "content": (
+                f"Question: {request.query}\n\n"
+                f"Local Data Sources ({engine_label}):\n{doc_context}\n\n"
+                f"{'Internet Sources:\n' + web_context if web_context else 'No internet results available.'}\n\n"
+                "Provide a comprehensive answer based on all available sources and our conversation context."
+            ),
+        })
+        
         answer = await chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Question: {request.query}\n\n"
-                        f"Local Data Sources ({engine_label}):\n{doc_context}\n\n"
-                        f"{'Internet Sources:\n' + web_context if web_context else 'No internet results available.'}\n\n"
-                        "Provide a comprehensive answer based on all available sources."
-                    ),
-                },
-            ],
+            messages=llm_messages,
             max_tokens=800,
         )
         llm_used = True
