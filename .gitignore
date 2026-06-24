@@ -1,73 +1,213 @@
-# Environment variables
+# ============================================================================
+# Environment & Configuration
+# ============================================================================
 .env
 .env.local
 .env.*.local
+.env.production.local
+.env.development.local
+.env.test.local
 
+# ============================================================================
 # Python
+# ============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 .venv
 pip-log.txt
 pip-delete-this-directory.txt
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
-*.egg-info/
-dist/
-build/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+*.py,cover
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Node
+# ============================================================================
+# Node.js & Frontend
+# ============================================================================
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+lerna-debug.log*
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
 
+# ============================================================================
 # Next.js
+# ============================================================================
 .next/
 out/
 .vercel
+.turbo/
+dist/
 
-# IDEs
+# ============================================================================
+# IDEs & Editors
+# ============================================================================
 .vscode/
+.vscode-test
 .idea/
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
 *.swp
 *.swo
 *~
 .DS_Store
+Thumbs.db
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
 
+# ============================================================================
 # Docker
+# ============================================================================
 .dockerignore
+docker-compose.override.yml
 
+# ============================================================================
 # Logs
+# ============================================================================
 logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
 
+# ============================================================================
 # Database
+# ============================================================================
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
 
-# Models
+# ============================================================================
+# Models & ML
+# ============================================================================
 models/
 *.bin
 *.pt
 *.pth
 *.onnx
+*.pb
+*.h5
+*.pkl
+*.pickle
 
-# Data
+# ============================================================================
+# Data & Media
+# ============================================================================
 data/
 screenshots/
 videos/
 uploads/
+*.mp4
+*.mov
+*.avi
+*.mkv
 
-# Temporary
+# ============================================================================
+# Temporary & Cache
+# ============================================================================
 tmp/
 temp/
 *.tmp
+.cache/
+.pytest_cache/
+.eslintcache
+.stylelintcache
+
+# ============================================================================
+# OS Files
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# ============================================================================
+# Documentation (auto-generated)
+# ============================================================================
+*.md
+!README.md
+!CONTRIBUTING.md
+!LICENSE.md
+docs/build/
+
+# ============================================================================
+# Build & Distribution
+# ============================================================================
+build/
+dist/
+*.egg-info/
+.eggs/
+*.whl
+
+# ============================================================================
+# IDE Specific
+# ============================================================================
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# ============================================================================
+# OS & System
+# ============================================================================
+.env.*.swp
+.env.*.swo
+*.bak
+*.backup
+*~
