@@ -22,6 +22,45 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8888")
+
+
+def _searxng_search(query: str, limit: int = 5) -> List[dict]:
+    """Search the internet using SearXNG metasearch engine."""
+    import requests
+    
+    try:
+        response = requests.get(
+            f"{SEARXNG_URL}/search",
+            params={
+                "q": query,
+                "format": "json",
+                "language": "en",
+                "categories": "general,news",
+                "pageno": 1,
+            },
+            timeout=10,
+        )
+        
+        if response.status_code != 200:
+            logger.warning(f"SearXNG returned status {response.status_code}")
+            return []
+        
+        data = response.json()
+        results = []
+        
+        for item in data.get("results", [])[:limit]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "content": item.get("content", ""),
+                "engine": item.get("engine", ""),
+            })
+        
+        return results
+    except Exception as e:
+        logger.info(f"SearXNG search failed: {e}")
+        return []
 
 
 class ResearchQuery(BaseModel):
@@ -223,18 +262,35 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
             })
 
     if not sources and not topic_stats:
-        answer = (
-            f"I couldn't find specific information about '{request.query}' in the database. "
-            "Try rephrasing your query or check if documents have been processed."
-        )
-        return {
-            "answer": answer,
-            "sources": sources,
-            "context": context,
-            "search_engine": search_engine,
-            "llm_used": False,
-            "model": None,
-        }
+        # Try internet search via SearXNG as fallback
+        web_results = _searxng_search(request.query, limit=5)
+        
+        if web_results:
+            for result in web_results:
+                sources.append({
+                    "type": "web",
+                    "title": result["title"],
+                    "url": result["url"],
+                    "engine": result["engine"],
+                })
+                context.append({
+                    "text": result["content"][:500] if result["content"] else result["title"],
+                    "source": f"Web: {result['title']}"
+                })
+            search_engine = "web (SearXNG)"
+        else:
+            answer = (
+                f"I couldn't find specific information about '{request.query}' in the database or on the web. "
+                "Try rephrasing your query or check if documents have been processed."
+            )
+            return {
+                "answer": answer,
+                "sources": sources,
+                "context": context,
+                "search_engine": search_engine,
+                "llm_used": False,
+                "model": None,
+            }
 
     # Build context string for LLM synthesis
     doc_context = "\n\n".join([
@@ -254,17 +310,19 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
     model_used = None
     try:
         from llm import chat_completion, LLM_MODEL
-        engine_label = "semantic (Qdrant)" if search_engine == "semantic" else "keyword"
+        engine_label = "semantic (Qdrant)" if search_engine == "semantic" else "keyword" if search_engine == "keyword" else "web (SearXNG)"
+        
+        system_prompt = (
+            "You are a political research assistant. "
+            "Answer based on the provided sources. "
+            "Be concise and factual. "
+            "If sources are from the web, cite the source URLs. "
+            "If sources are from collected social media data, reference the platform and author."
+        )
+        
         answer = await chat_completion(
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a political research assistant. "
-                        "Answer based only on the provided sources. "
-                        "Be concise and factual."
-                    ),
-                },
+                {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
                     "content": (

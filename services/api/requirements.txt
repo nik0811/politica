@@ -21,3 +21,4 @@ litellm>=1.40.0
 boto3
 apscheduler>=3.10.0
 rank-bm25>=0.2.2
+requests>=2.31.0

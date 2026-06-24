@@ -235,6 +235,18 @@ services:
       - ./shared:/shared
       - model_cache:/models
 
+  # ─── SearXNG (Internet Search) ──────────────────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: politica-searxng
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888
+    volumes:
+      - searxng_data:/etc/searxng
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
@@ -242,6 +254,7 @@ volumes:
   qdrant_data:
   elasticsearch_data:
   model_cache:
+  searxng_data:
 
 networks:
   default:
