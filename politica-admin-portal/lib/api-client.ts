@@ -431,10 +431,17 @@ class APIClient {
     return this.request<any>(`/api/research/conversations/${conversationId}`)
   }
 
-  async addMessage(conversationId: string, content: string, sender: string, sources?: any[]): Promise<any> {
+  async addMessage(conversationId: string, message: { content: string; sender: string; sources?: any[] }): Promise<any> {
     return this.request<any>(`/api/research/conversations/${conversationId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content, sender, sources: sources || [] }),
+      body: JSON.stringify(message),
+    })
+  }
+
+  async searchResearch(params: { query: string; max_results?: number }): Promise<any> {
+    return this.request<any>("/api/research/query", {
+      method: "POST",
+      body: JSON.stringify(params),
     })
   }
 

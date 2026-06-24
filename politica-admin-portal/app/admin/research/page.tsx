@@ -2,421 +2,458 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Send,
+  Loader2,
+  ThumbsUp,
+  ThumbsDown,
+  Star,
+  MessageSquare,
+  AlertCircle,
+  BarChart3,
+} from "lucide-react"
 import { apiClient } from "@/lib/api-client"
-import { Send, Bot, User, Loader2, FileText, BookMarked, Users, Plus, Trash2, MessageSquare } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 
 interface Message {
   id: string
-  role: "user" | "assistant"
   content: string
+  sender: "user" | "assistant"
   sources?: any[]
-  timestamp: Date
+  timestamp: string
 }
 
-interface Conversation {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-  message_count: number
+interface FeedbackState {
+  messageId: string | null
+  type: "helpful" | "incorrect" | "incomplete" | "irrelevant" | null
+  rating: number | null
+  comment: string
+  suggestion: string
 }
 
 export default function ResearchPage() {
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "0",
-      role: "assistant",
-      content: "Hello! I'm your political intelligence research assistant. Ask me about documents, promises, entities, or trends.",
-      timestamp: new Date(),
-    },
-  ])
-  const [input, setInput] = useState("")
+  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
-  const [kbStats, setKbStats] = useState<any>(null)
-  const [showConversationList, setShowConversationList] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [feedbackStats, setFeedbackStats] = useState<any>(null)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [feedback, setFeedback] = useState<FeedbackState>({
+    messageId: null,
+    type: null,
+    rating: null,
+    comment: "",
+    suggestion: "",
+  })
+  const scrollRef = useRef<HTMLDivElement>(null)
 
+  // Initialize conversation
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    initializeConversation()
+    fetchFeedbackStats()
+  }, [])
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollIntoView({ behavior: "smooth" })
+    }
   }, [messages])
 
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        const stats = await apiClient.getKnowledgeBaseStats()
-        setKbStats(stats)
-      } catch (error) {
-        console.error("Failed to fetch KB stats:", error)
-      }
-    }
-    fetchStats()
-  }, [])
-
-  useEffect(() => {
-    loadConversations()
-  }, [])
-
-  const loadConversations = async () => {
+  async function initializeConversation() {
     try {
-      const convs = await apiClient.listConversations()
-      setConversations(convs)
-    } catch (error) {
-      console.error("Failed to load conversations:", error)
-    }
-  }
-
-  const startNewConversation = async () => {
-    try {
-      const title = `Conversation ${new Date().toLocaleString()}`
-      const newConv = await apiClient.createConversation(title)
-      setCurrentConversationId(newConv.id)
-      setMessages([
-        {
-          id: "0",
-          role: "assistant",
-          content: "Hello! I'm your political intelligence research assistant. Ask me about documents, promises, entities, or trends.",
-          timestamp: new Date(),
-        },
-      ])
-      await loadConversations()
+      const conv = await apiClient.createConversation("Research Session")
+      setConversationId(conv.id)
     } catch (error) {
       console.error("Failed to create conversation:", error)
     }
   }
 
-  const loadConversation = async (conversationId: string) => {
+  async function fetchFeedbackStats() {
     try {
-      const conv = await apiClient.getConversation(conversationId)
-      setCurrentConversationId(conversationId)
-      const loadedMessages = conv.messages.map((msg: any) => ({
-        id: msg.id,
-        role: msg.sender,
-        content: msg.content,
-        sources: msg.sources,
-        timestamp: new Date(msg.timestamp),
-      }))
-      setMessages(loadedMessages.length > 0 ? loadedMessages : [
-        {
-          id: "0",
-          role: "assistant",
-          content: "Hello! I'm your political intelligence research assistant. Ask me about documents, promises, entities, or trends.",
-          timestamp: new Date(),
-        },
-      ])
-      setShowConversationList(false)
+      const stats = await apiClient.getFeedbackStats()
+      setFeedbackStats(stats)
     } catch (error) {
-      console.error("Failed to load conversation:", error)
+      console.error("Failed to fetch feedback stats:", error)
     }
   }
 
-  const deleteConversation = async (conversationId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    try {
-      await apiClient.deleteConversation(conversationId)
-      if (currentConversationId === conversationId) {
-        setCurrentConversationId(null)
-        setMessages([
-          {
-            id: "0",
-            role: "assistant",
-            content: "Hello! I'm your political intelligence research assistant. Ask me about documents, promises, entities, or trends.",
-            timestamp: new Date(),
-          },
-        ])
-      }
-      await loadConversations()
-    } catch (error) {
-      console.error("Failed to delete conversation:", error)
-    }
-  }
+  async function handleSubmitQuery() {
+    if (!query.trim() || !conversationId || loading) return
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || loading) return
-
-    let conversationId = currentConversationId
-    if (!conversationId) {
-      const newConv = await apiClient.createConversation(`Conversation ${new Date().toLocaleString()}`)
-      conversationId = newConv.id
-      setCurrentConversationId(conversationId)
-      await loadConversations()
+    const userMessage: Message = {
+      id: `msg_${Date.now()}`,
+      content: query,
+      sender: "user",
+      timestamp: new Date().toISOString(),
     }
 
-    setInput("")
+    setMessages((prev) => [...prev, userMessage])
+    setQuery("")
     setLoading(true)
 
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: text,
-      timestamp: new Date(),
-    }
-    setMessages((prev) => [...prev, userMsg])
-
     try {
-      await apiClient.addMessage(conversationId, text, "user")
+      // Add user message to conversation
+      await apiClient.addMessage(conversationId, {
+        content: query,
+        sender: "user",
+      })
 
-      const response = await apiClient.researchQuery(text)
+      // Get assistant response
+      const response = await apiClient.searchResearch({
+        query,
+        max_results: 5,
+      })
 
-      const assistantMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
+      const assistantMessage: Message = {
+        id: `msg_${Date.now()}_assistant`,
         content: response.answer,
+        sender: "assistant",
         sources: response.sources,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       }
-      setMessages((prev) => [...prev, assistantMsg])
 
-      await apiClient.addMessage(conversationId, response.answer, "assistant", response.sources)
-      await loadConversations()
+      // Add assistant message to conversation
+      await apiClient.addMessage(conversationId, {
+        content: response.answer,
+        sender: "assistant",
+        sources: response.sources,
+      })
+
+      setMessages((prev) => [...prev, assistantMessage])
     } catch (error) {
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "assistant",
-        content: "Sorry, I encountered an error processing your request. Please try again.",
-        timestamp: new Date(),
+      console.error("Failed to get response:", error)
+      const errorMessage: Message = {
+        id: `msg_${Date.now()}_error`,
+        content: "Sorry, I encountered an error processing your query. Please try again.",
+        sender: "assistant",
+        timestamp: new Date().toISOString(),
       }
-      setMessages((prev) => [...prev, errorMsg])
+      setMessages((prev) => [...prev, errorMessage])
     } finally {
       setLoading(false)
     }
   }
 
-  const currentConversation = conversations.find((c) => c.id === currentConversationId)
+  async function handleSubmitFeedback() {
+    if (!feedback.messageId || !feedback.type) return
+
+    try {
+      await apiClient.submitFeedback({
+        message_id: feedback.messageId,
+        rating: feedback.rating,
+        feedback_type: feedback.type,
+        comment: feedback.comment || undefined,
+        suggested_improvement: feedback.suggestion || undefined,
+      })
+
+      // Reset feedback form
+      setFeedback({
+        messageId: null,
+        type: null,
+        rating: null,
+        comment: "",
+        suggestion: "",
+      })
+      setShowFeedback(false)
+
+      // Refresh stats
+      await fetchFeedbackStats()
+
+      // Show success message
+      const successMsg: Message = {
+        id: `msg_${Date.now()}_success`,
+        content: "✅ Thank you for your feedback! It helps me improve.",
+        sender: "assistant",
+        timestamp: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, successMsg])
+    } catch (error) {
+      console.error("Failed to submit feedback:", error)
+    }
+  }
+
+  function startFeedback(messageId: string) {
+    setFeedback({ ...feedback, messageId })
+    setShowFeedback(true)
+  }
 
   return (
-    <div className="flex flex-col gap-4 max-w-6xl mx-auto h-full">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        {/* Conversations Sidebar */}
-        <div className="lg:col-span-1">
-          <Card className="bg-card border-border flex flex-col overflow-hidden" style={{ height: "calc(100vh - 12rem)" }}>
-            <CardHeader className="pb-3 border-b border-border shrink-0">
-              <CardTitle className="text-sm font-medium flex items-center gap-2">
-                <MessageSquare className="size-4 text-primary" /> Conversations
-              </CardTitle>
-            </CardHeader>
+    <div className="flex flex-col gap-6 h-screen">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Research Assistant</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Ask questions about your data and get AI-powered insights</p>
+        </div>
+        {feedbackStats && (
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-sm font-medium">{feedbackStats.total_feedback} feedback</p>
+              <p className="text-xs text-muted-foreground">⭐ {feedbackStats.average_rating?.toFixed(1)}/5</p>
+            </div>
+          </div>
+        )}
+      </div>
 
-            <div className="flex-1 overflow-y-auto px-3 py-3">
-              <div className="flex flex-col gap-2">
-                <Button
-                  onClick={startNewConversation}
-                  size="sm"
-                  className="w-full justify-start gap-2 mb-2"
-                  variant="outline"
-                >
-                  <Plus className="size-3.5" /> New Chat
-                </Button>
-
-                {conversations.length === 0 ? (
-                  <p className="text-xs text-muted-foreground text-center py-4">No conversations yet</p>
-                ) : (
-                  conversations.map((conv) => (
-                    <div
-                      key={conv.id}
-                      onClick={() => loadConversation(conv.id)}
-                      className={`p-2 rounded-lg cursor-pointer transition-colors text-xs group ${
-                        currentConversationId === conv.id
-                          ? "bg-primary/10 border border-primary/30"
-                          : "hover:bg-muted border border-transparent"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{conv.title}</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {conv.message_count} messages
-                          </p>
-                        </div>
-                        <Button
-                          onClick={(e) => deleteConversation(conv.id, e)}
-                          size="icon"
-                          variant="ghost"
-                          className="size-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                        >
-                          <Trash2 className="size-3" />
-                        </Button>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
+        {/* Chat Area */}
+        <div className="lg:col-span-3 flex flex-col gap-4">
+          <Card className="bg-card border-border flex-1 flex flex-col min-h-0">
+            <CardContent className="flex-1 overflow-hidden flex flex-col p-4">
+              <ScrollArea className="flex-1 pr-4">
+                <div className="space-y-4">
+                  {messages.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-center py-12">
+                      <div>
+                        <MessageSquare className="size-12 mx-auto mb-3 text-muted-foreground opacity-30" />
+                        <p className="text-sm text-muted-foreground">
+                          Start by asking a question about your data
+                        </p>
                       </div>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    messages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-3 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className={`max-w-md lg:max-w-lg px-4 py-3 rounded-lg ${
+                            msg.sender === "user"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-foreground border border-border"
+                          }`}
+                        >
+                          <div className="text-sm">
+                            {msg.sender === "assistant" ? (
+                              <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">
+                                {msg.content}
+                              </ReactMarkdown>
+                            ) : (
+                              msg.content
+                            )}
+                          </div>
+
+                          {/* Feedback Buttons for Assistant Messages */}
+                          {msg.sender === "assistant" && !msg.content.includes("✅") && (
+                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-current border-opacity-20">
+                              <button
+                                onClick={() => startFeedback(msg.id)}
+                                className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                              >
+                                <ThumbsUp className="size-3" />
+                                Helpful
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setFeedback({
+                                    messageId: msg.id,
+                                    type: "incorrect",
+                                    rating: null,
+                                    comment: "",
+                                    suggestion: "",
+                                  })
+                                  setShowFeedback(true)
+                                }}
+                                className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                              >
+                                <ThumbsDown className="size-3" />
+                                Improve
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <div ref={scrollRef} />
+                </div>
+              </ScrollArea>
+
+              {/* Input Area */}
+              <div className="flex gap-2 mt-4 pt-4 border-t border-border">
+                <Input
+                  placeholder="Ask a question about your data..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === "Enter" && handleSubmitQuery()}
+                  disabled={loading}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={handleSubmitQuery}
+                  disabled={loading || !query.trim()}
+                  size="sm"
+                >
+                  {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                </Button>
               </div>
-            </div>
+            </CardContent>
           </Card>
         </div>
 
-        {/* Chat Area */}
-        <Card className="lg:col-span-2 bg-card border-border flex flex-col overflow-hidden" style={{ height: "calc(100vh - 12rem)" }}>
-          <CardHeader className="pb-3 border-b border-border shrink-0">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Bot className="size-4 text-primary" /> Research Assistant
-              <Badge variant="secondary" className="text-[10px] ml-auto">
-                {currentConversation ? "Active" : "New Chat"}
-              </Badge>
-            </CardTitle>
-            {currentConversation && (
-              <p className="text-xs text-muted-foreground mt-1">{currentConversation.title}</p>
-            )}
-          </CardHeader>
+        {/* Sidebar */}
+        <div className="flex flex-col gap-4">
+          {/* Feedback Form */}
+          {showFeedback && (
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Share Feedback</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Feedback Type */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">
+                    What's your feedback?
+                  </label>
+                  <div className="space-y-2">
+                    {(["helpful", "incorrect", "incomplete", "irrelevant"] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setFeedback({ ...feedback, type })}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                          feedback.type === type
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted hover:bg-muted/80"
+                        }`}
+                      >
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            <div className="flex flex-col gap-4">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                  <div
-                    className={`size-7 rounded-full flex items-center justify-center shrink-0 ${
-                      msg.role === "user" ? "bg-primary/20" : "bg-muted"
-                    }`}
+                {/* Rating */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-2 block">
+                    Rate this response
+                  </label>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        onClick={() => setFeedback({ ...feedback, rating: star })}
+                        className="transition-colors"
+                      >
+                        <Star
+                          className={`size-5 ${
+                            feedback.rating && feedback.rating >= star
+                              ? "fill-yellow-400 text-yellow-400"
+                              : "text-muted-foreground"
+                          }`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Comment */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    Comment (optional)
+                  </label>
+                  <textarea
+                    value={feedback.comment}
+                    onChange={(e) => setFeedback({ ...feedback, comment: e.target.value })}
+                    placeholder="What could be improved?"
+                    className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm resize-none"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Suggestion */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
+                    Suggestion (optional)
+                  </label>
+                  <textarea
+                    value={feedback.suggestion}
+                    onChange={(e) => setFeedback({ ...feedback, suggestion: e.target.value })}
+                    placeholder="How should I improve?"
+                    className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm resize-none"
+                    rows={2}
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSubmitFeedback}
+                    disabled={!feedback.type}
+                    size="sm"
+                    className="flex-1"
                   >
-                    {msg.role === "user" ? (
-                      <User className="size-3.5 text-primary" />
-                    ) : (
-                      <Bot className="size-3.5 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === "user" ? "items-end" : ""}`}>
-                    <div
-                      className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
-                        msg.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
-                      }`}
-                    >
-                      {msg.role === "user" ? (
-                        msg.content
-                      ) : (
-                        <ReactMarkdown
-                          components={{
-                            h1: ({ children }) => <h1 className="text-lg font-bold mb-2">{children}</h1>,
-                            h2: ({ children }) => <h2 className="text-base font-semibold mb-2">{children}</h2>,
-                            h3: ({ children }) => <h3 className="text-sm font-semibold mb-1">{children}</h3>,
-                            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                            ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-                            ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-                            li: ({ children }) => <li className="text-sm">{children}</li>,
-                            strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-                            table: ({ children }) => (
-                              <div className="overflow-x-auto my-2">
-                                <table className="min-w-full text-xs border-collapse">{children}</table>
-                              </div>
-                            ),
-                            thead: ({ children }) => <thead className="bg-background/50">{children}</thead>,
-                            tbody: ({ children }) => <tbody>{children}</tbody>,
-                            tr: ({ children }) => <tr className="border-b border-border/50">{children}</tr>,
-                            th: ({ children }) => <th className="px-2 py-1.5 text-left font-semibold">{children}</th>,
-                            td: ({ children }) => <td className="px-2 py-1.5">{children}</td>,
-                            code: ({ children }) => (
-                              <code className="bg-background/50 px-1 py-0.5 rounded text-xs font-mono">{children}</code>
-                            ),
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      )}
-                    </div>
-                    {msg.sources && msg.sources.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {msg.sources.map((s: any, i: number) => (
-                          <span
-                            key={i}
-                            className="flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/50 border border-border px-2 py-0.5 rounded-full"
-                          >
-                            {s.type === "document" ? (
-                              <FileText className="size-2.5" />
-                            ) : s.type === "promise" ? (
-                              <BookMarked className="size-2.5" />
-                            ) : (
-                              <Users className="size-2.5" />
-                            )}
-                            {s.title?.slice(0, 30) || s.entity || "Source"}
-                          </span>
-                        ))}
+                    Submit
+                  </Button>
+                  <Button
+                    onClick={() => setShowFeedback(false)}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Feedback Stats */}
+          {feedbackStats && (
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BarChart3 className="size-4" />
+                  Feedback Stats
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Average Rating</p>
+                  <p className="text-lg font-semibold">
+                    {feedbackStats.average_rating?.toFixed(1)}/5 ⭐
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">Feedback Breakdown</p>
+                  <div className="space-y-1">
+                    {Object.entries(feedbackStats.feedback_by_type || {}).map(([type, count]: any) => (
+                      <div key={type} className="flex items-center justify-between text-xs">
+                        <span className="capitalize text-muted-foreground">{type}</span>
+                        <span className="font-medium">{count}</span>
                       </div>
-                    )}
-                    <span className="text-[10px] text-muted-foreground">
-                      {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
+                    ))}
                   </div>
                 </div>
-              ))}
 
-              {loading && (
-                <div className="flex gap-3">
-                  <div className="size-7 rounded-full bg-muted flex items-center justify-center shrink-0">
-                    <Bot className="size-3.5 text-muted-foreground" />
-                  </div>
-                  <div className="bg-muted rounded-xl px-4 py-3 flex items-center gap-1.5">
-                    <Loader2 className="size-4 animate-spin" />
-                    <span className="text-sm">Searching...</span>
-                  </div>
+                <div className="pt-2 border-t border-border">
+                  <p className="text-xs text-muted-foreground">
+                    Total: {feedbackStats.total_feedback} responses
+                  </p>
                 </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          </div>
+              </CardContent>
+            </Card>
+          )}
 
-          <div className="p-4 border-t border-border shrink-0">
-            <div className="flex gap-2">
-              <Input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage(input)}
-                placeholder="Ask about documents, promises, entities..."
-                className="bg-input border-border text-sm h-10"
-                disabled={loading}
-              />
-              <Button
-                onClick={() => sendMessage(input)}
-                disabled={loading || !input.trim()}
-                size="icon"
-                className="size-10 shrink-0"
-              >
-                <Send className="size-4" />
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        {/* Knowledge Base Stats */}
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Knowledge Base
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-1.5 pt-0 text-xs">
-            {kbStats ? (
-              <>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Documents</span>
-                  <span className="font-medium text-foreground">{kbStats.documents?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Promises</span>
-                  <span className="font-medium text-foreground">{kbStats.promises?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Entities</span>
-                  <span className="font-medium text-foreground">{kbStats.entities?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex items-center justify-between py-1 border-b border-border/50">
-                  <span className="text-muted-foreground">Topics</span>
-                  <span className="font-medium text-foreground">{kbStats.topics?.toLocaleString() || 0}</span>
-                </div>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-muted-foreground">Languages</span>
-                  <span className="font-medium text-foreground">{kbStats.languages?.toLocaleString() || 0}</span>
-                </div>
-              </>
-            ) : (
-              <Loader2 className="size-4 animate-spin mx-auto my-4" />
-            )}
-          </CardContent>
-        </Card>
+          {/* Tips */}
+          <Card className="bg-blue-500/5 border-blue-500/20">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <AlertCircle className="size-4 text-blue-500" />
+                Tips
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground space-y-2">
+              <p>• Be specific in your questions</p>
+              <p>• Provide feedback to help improve</p>
+              <p>• Use suggestions to guide improvements</p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )
