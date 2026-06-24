@@ -262,7 +262,8 @@ export default function ResearchPage() {
     <div className="flex h-[calc(100vh-4rem)] gap-0 -m-6">
       {/* Sidebar */}
       <aside className="w-72 bg-muted/30 border-r border-border flex flex-col">
-        <div className="p-4 border-b border-border">
+        <div className="px-4 pt-4 pb-3 border-b border-border">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">History</p>
           <Button onClick={createNewConversation} className="w-full" size="sm" variant="outline">
             <Plus className="size-4 mr-2" />
             New Session
