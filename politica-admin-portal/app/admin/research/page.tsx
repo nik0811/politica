@@ -120,6 +120,8 @@ export default function ResearchPage() {
     }
   }
 
+  const [loadingStage, setLoadingStage] = useState<string>("")
+
   async function handleSubmitQuery() {
     if (!query.trim() || loading) return
 
@@ -148,8 +150,10 @@ export default function ResearchPage() {
     const currentQuery = query
     setQuery("")
     setLoading(true)
+    setLoadingStage("Thinking...")
 
     try {
+      // Stage 1: Save user message
       const userMsgResponse = await apiClient.addMessage(convId, {
         content: currentQuery,
         sender: "user",
@@ -159,8 +163,20 @@ export default function ResearchPage() {
         prev.map((msg) => msg.id === userMessage.id ? { ...msg, id: userMsgResponse.id } : msg)
       )
 
+      // Stage 2: Searching
+      setLoadingStage("Searching database...")
+      await new Promise(r => setTimeout(r, 400))
+      
+      setLoadingStage("Searching internet...")
       const response = await apiClient.searchResearch({ query: currentQuery, max_results: 5 })
 
+      // Stage 3: Analyzing
+      setLoadingStage("Analyzing sources...")
+      await new Promise(r => setTimeout(r, 300))
+
+      // Stage 4: Generating
+      setLoadingStage("Generating response...")
+      
       const assistantMsgResponse = await apiClient.addMessage(convId, {
         content: response.answer,
         sender: "assistant",
@@ -188,6 +204,7 @@ export default function ResearchPage() {
       ])
     } finally {
       setLoading(false)
+      setLoadingStage("")
       inputRef.current?.focus()
     }
   }
@@ -467,12 +484,32 @@ export default function ResearchPage() {
               {loading && (
                 <div className="flex gap-3">
                   <div className="size-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                    <Brain className="size-3.5 text-primary" />
+                    <Brain className="size-3.5 text-primary animate-pulse" />
                   </div>
                   <div className="bg-muted/60 border border-border rounded-xl rounded-bl-sm px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                      <span className="text-sm text-muted-foreground">Analyzing...</span>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="size-3.5 animate-spin text-primary" />
+                        <span className="text-sm font-medium text-foreground">{loadingStage}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {["Thinking", "Searching", "Analyzing", "Generating"].map((stage, idx) => {
+                          const currentIdx = loadingStage.includes("Think") ? 0 
+                            : loadingStage.includes("Search") ? 1 
+                            : loadingStage.includes("Analyz") ? 2 
+                            : loadingStage.includes("Generat") ? 3 : 0
+                          return (
+                            <div key={stage} className="flex items-center gap-1.5">
+                              <div className={`size-1.5 rounded-full transition-all duration-300 ${
+                                idx <= currentIdx ? "bg-primary scale-110" : "bg-muted-foreground/30"
+                              }`} />
+                              {idx < 3 && <div className={`w-4 h-px transition-all duration-300 ${
+                                idx < currentIdx ? "bg-primary" : "bg-muted-foreground/20"
+                              }`} />}
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>

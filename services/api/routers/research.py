@@ -306,19 +306,61 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         ])
         doc_context = topic_summary + "\n\n" + doc_context
 
+    # Always search the internet for supplementary info
+    web_context = ""
+    web_sources_added = []
+    try:
+        web_results = _searxng_search(request.query, limit=3)
+        if web_results:
+            for result in web_results:
+                web_sources_added.append({
+                    "type": "web",
+                    "title": result["title"],
+                    "url": result["url"],
+                    "engine": result["engine"],
+                })
+                web_context += f"\nWeb Source: {result['title']}\nURL: {result['url']}\n{result['content'][:300]}\n"
+            
+            if not sources:
+                sources.extend(web_sources_added)
+                search_engine = "web (SearXNG)"
+    except Exception as e:
+        logger.info(f"Web search skipped: {e}")
+
+    # Detect language (Hindi or English)
+    hindi_chars = sum(1 for c in request.query if '\u0900' <= c <= '\u097F')
+    is_hindi = hindi_chars > len(request.query) * 0.2 or any(
+        word in request.query.lower() for word in ['kya', 'hai', 'kaise', 'kaun', 'kahan', 'kab', 'kyun', 'batao', 'bataiye']
+    )
+
     llm_used = False
     model_used = None
     try:
         from llm import chat_completion, LLM_MODEL
         engine_label = "semantic (Qdrant)" if search_engine == "semantic" else "keyword" if search_engine == "keyword" else "web (SearXNG)"
         
-        system_prompt = (
-            "You are a political research assistant. "
-            "Answer based on the provided sources. "
-            "Be concise and factual. "
-            "If sources are from the web, cite the source URLs. "
-            "If sources are from collected social media data, reference the platform and author."
+        language_instruction = (
+            "Respond in Hindi (Devanagari script) if the user's question is in Hindi or Hinglish. "
+            "Otherwise respond in English. "
+        ) if is_hindi else (
+            "Respond in the same language as the user's question. "
+            "If the question is in Hindi/Hinglish, reply in Hindi. If English, reply in English. "
         )
+        
+        system_prompt = (
+            "You are an intelligent political research assistant with access to local data and internet search. "
+            f"{language_instruction}"
+            "Answer based on the provided sources. Be concise, factual, and well-structured. "
+            "Use bullet points and headers for clarity. "
+            "If sources include web URLs, cite them. "
+            "If sources are from social media, reference the platform and author. "
+            "If the information is insufficient, say so clearly."
+        )
+        
+        # Build full context
+        full_context = doc_context
+        if web_context:
+            full_context += f"\n\n--- Internet Search Results ---\n{web_context}"
         
         answer = await chat_completion(
             messages=[
@@ -327,12 +369,13 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
                     "role": "user",
                     "content": (
                         f"Question: {request.query}\n\n"
-                        f"Sources ({engine_label} search):\n{doc_context}\n\n"
-                        "Provide a concise answer based on these sources."
+                        f"Local Data Sources ({engine_label}):\n{doc_context}\n\n"
+                        f"{'Internet Sources:\n' + web_context if web_context else 'No internet results available.'}\n\n"
+                        "Provide a comprehensive answer based on all available sources."
                     ),
                 },
             ],
-            max_tokens=500,
+            max_tokens=800,
         )
         llm_used = True
         model_used = LLM_MODEL
@@ -358,6 +401,8 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         "search_engine": search_engine,
         "llm_used": llm_used,
         "model": model_used,
+        "web_searched": bool(web_context),
+        "language": "hi" if is_hindi else "en",
     }
 
 
