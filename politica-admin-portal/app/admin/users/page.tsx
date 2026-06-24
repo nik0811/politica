@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { apiClient } from "@/lib/api-client"
 import { Search, Plus, Users as UsersIcon, UserCheck, UserX, UserMinus, Mail, Shield, Calendar, Loader2, Trash2 } from "lucide-react"
 
@@ -112,13 +112,14 @@ export default function UsersPage() {
           <h1 className="text-2xl font-semibold text-foreground">User Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Manage user accounts, roles, and permissions</p>
         </div>
+        <button 
+          onClick={() => setIsDialogOpen(true)}
+          className="inline-flex items-center justify-center rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90"
+        >
+          <Plus className="size-3.5 mr-1.5" />
+          Add User
+        </button>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <button className="inline-flex items-center justify-center rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90">
-              <Plus className="size-3.5 mr-1.5" />
-              Add User
-            </button>
-          </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create New User</DialogTitle>
