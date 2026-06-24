@@ -164,10 +164,10 @@ export default function ResearchPage() {
       )
 
       // Stage 2: Searching
-      setLoadingStage("Searching database...")
+      setLoadingStage("Searching local data...")
       await new Promise(r => setTimeout(r, 400))
       
-      setLoadingStage("Searching internet...")
+      setLoadingStage("Searching internet if needed...")
       const response = await apiClient.searchResearch({ query: currentQuery, max_results: 5 })
 
       // Stage 3: Analyzing

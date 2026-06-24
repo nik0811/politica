@@ -306,26 +306,27 @@ async def research_query(request: ResearchQuery, db: Session = Depends(get_db)):
         ])
         doc_context = topic_summary + "\n\n" + doc_context
 
-    # Always search the internet for supplementary info
+    # Search internet ONLY if local sources are insufficient
     web_context = ""
     web_sources_added = []
-    try:
-        web_results = _searxng_search(request.query, limit=3)
-        if web_results:
-            for result in web_results:
-                web_sources_added.append({
-                    "type": "web",
-                    "title": result["title"],
-                    "url": result["url"],
-                    "engine": result["engine"],
-                })
-                web_context += f"\nWeb Source: {result['title']}\nURL: {result['url']}\n{result['content'][:300]}\n"
-            
-            if not sources:
+    if not sources or len(sources) < 2:
+        try:
+            web_results = _searxng_search(request.query, limit=5)
+            if web_results:
+                for result in web_results:
+                    web_sources_added.append({
+                        "type": "web",
+                        "title": result["title"],
+                        "url": result["url"],
+                        "engine": result["engine"],
+                    })
+                    web_context += f"\nWeb Source: {result['title']}\nURL: {result['url']}\n{result['content'][:300]}\n"
+                
                 sources.extend(web_sources_added)
-                search_engine = "web (SearXNG)"
-    except Exception as e:
-        logger.info(f"Web search skipped: {e}")
+                if not doc_context.strip():
+                    search_engine = "web (SearXNG)"
+        except Exception as e:
+            logger.info(f"Web search skipped: {e}")
 
     # Detect language (Hindi or English)
     hindi_chars = sum(1 for c in request.query if '\u0900' <= c <= '\u097F')
