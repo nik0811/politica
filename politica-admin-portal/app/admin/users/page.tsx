@@ -114,10 +114,10 @@ export default function UsersPage() {
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
+            <button className="inline-flex items-center justify-center rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:bg-primary/90">
               <Plus className="size-3.5 mr-1.5" />
               Add User
-            </Button>
+            </button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
