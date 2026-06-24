@@ -9,7 +9,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -118,9 +117,9 @@ export function AdminHeader() {
             {theme === "system" && <Monitor className="size-4" />}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-36">
-            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal pb-1">
+            <div className="px-1.5 py-1 text-xs font-normal text-muted-foreground">
               Appearance
-            </DropdownMenuLabel>
+            </div>
             {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
               <DropdownMenuItem
                 key={value}
@@ -155,12 +154,12 @@ export function AdminHeader() {
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
+            <div className="px-1.5 py-1 text-xs text-muted-foreground font-normal">
               Signed in as
-            </DropdownMenuLabel>
-            <DropdownMenuLabel className="text-sm -mt-1 font-semibold">
+            </div>
+            <div className="px-1.5 pb-1 text-sm font-semibold">
               {username}
-            </DropdownMenuLabel>
+            </div>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2 text-sm cursor-pointer"
