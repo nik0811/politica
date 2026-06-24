@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -12,8 +12,9 @@ import {
   ThumbsDown,
   Star,
   MessageSquare,
-  AlertCircle,
-  BarChart3,
+  Plus,
+  Trash2,
+  Clock,
 } from "lucide-react"
 import { apiClient } from "@/lib/api-client"
 import ReactMarkdown from "react-markdown"
@@ -26,35 +27,35 @@ interface Message {
   timestamp: string
 }
 
-interface FeedbackState {
-  messageId: string | null
-  type: "helpful" | "incorrect" | "incomplete" | "irrelevant" | null
-  rating: number | null
-  comment: string
-  suggestion: string
+interface Conversation {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
 }
 
 export default function ResearchPage() {
-  const [conversationId, setConversationId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [query, setQuery] = useState("")
   const [loading, setLoading] = useState(false)
-  const [feedbackStats, setFeedbackStats] = useState<any>(null)
-  const [showFeedback, setShowFeedback] = useState(false)
-  const [feedback, setFeedback] = useState<FeedbackState>({
-    messageId: null,
-    type: null,
-    rating: null,
-    comment: "",
-    suggestion: "",
-  })
+  const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null)
+  const [feedbackData, setFeedbackData] = useState<any>({})
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  // Initialize conversation
+  // Load conversations on mount
   useEffect(() => {
-    initializeConversation()
-    fetchFeedbackStats()
+    loadConversations()
   }, [])
+
+  // Load messages when conversation changes
+  useEffect(() => {
+    if (currentConversation) {
+      loadMessages(currentConversation.id)
+    }
+  }, [currentConversation])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -63,26 +64,53 @@ export default function ResearchPage() {
     }
   }, [messages])
 
-  async function initializeConversation() {
+  async function loadConversations() {
     try {
-      const conv = await apiClient.createConversation("Research Session")
-      setConversationId(conv.id)
+      const convs = await apiClient.listConversations()
+      setConversations(convs)
+      if (convs.length > 0 && !currentConversation) {
+        setCurrentConversation(convs[0])
+      }
+    } catch (error) {
+      console.error("Failed to load conversations:", error)
+    }
+  }
+
+  async function loadMessages(conversationId: string) {
+    try {
+      const msgs = await apiClient.getMessages(conversationId)
+      setMessages(msgs)
+    } catch (error) {
+      console.error("Failed to load messages:", error)
+    }
+  }
+
+  async function createNewConversation() {
+    try {
+      const conv = await apiClient.createConversation(`Research - ${new Date().toLocaleDateString()}`)
+      setConversations([conv, ...conversations])
+      setCurrentConversation(conv)
+      setMessages([])
     } catch (error) {
       console.error("Failed to create conversation:", error)
     }
   }
 
-  async function fetchFeedbackStats() {
+  async function deleteConversation(id: string) {
     try {
-      const stats = await apiClient.getFeedbackStats()
-      setFeedbackStats(stats)
+      await apiClient.deleteConversation(id)
+      setConversations(conversations.filter(c => c.id !== id))
+      if (currentConversation?.id === id) {
+        setCurrentConversation(conversations[0] || null)
+        setMessages([])
+      }
     } catch (error) {
-      console.error("Failed to fetch feedback stats:", error)
+      console.error("Failed to delete conversation:", error)
     }
   }
 
   async function handleSubmitQuery() {
-    if (!query.trim() || !conversationId || loading) return
+    if (!query.trim() || !currentConversation || loading) return
 
     const userMessage: Message = {
       id: `msg_${Date.now()}`,
@@ -96,8 +124,8 @@ export default function ResearchPage() {
     setLoading(true)
 
     try {
-      // Add user message to conversation
-      await apiClient.addMessage(conversationId, {
+      // Add user message
+      await apiClient.addMessage(currentConversation.id, {
         content: query,
         sender: "user",
       })
@@ -116,8 +144,8 @@ export default function ResearchPage() {
         timestamp: new Date().toISOString(),
       }
 
-      // Add assistant message to conversation
-      await apiClient.addMessage(conversationId, {
+      // Add assistant message
+      await apiClient.addMessage(currentConversation.id, {
         content: response.answer,
         sender: "assistant",
         sources: response.sources,
@@ -128,7 +156,7 @@ export default function ResearchPage() {
       console.error("Failed to get response:", error)
       const errorMessage: Message = {
         id: `msg_${Date.now()}_error`,
-        content: "Sorry, I encountered an error processing your query. Please try again.",
+        content: "Sorry, I encountered an error. Please try again.",
         sender: "assistant",
         timestamp: new Date().toISOString(),
       }
@@ -138,322 +166,230 @@ export default function ResearchPage() {
     }
   }
 
-  async function handleSubmitFeedback() {
-    if (!feedback.messageId || !feedback.type) return
-
+  async function submitFeedback(messageId: string) {
     try {
       await apiClient.submitFeedback({
-        message_id: feedback.messageId,
-        rating: feedback.rating,
-        feedback_type: feedback.type,
-        comment: feedback.comment || undefined,
-        suggested_improvement: feedback.suggestion || undefined,
+        message_id: messageId,
+        rating: feedbackData[messageId]?.rating,
+        feedback_type: feedbackData[messageId]?.type,
+        comment: feedbackData[messageId]?.comment,
+        suggested_improvement: feedbackData[messageId]?.suggestion,
       })
 
-      // Reset feedback form
-      setFeedback({
-        messageId: null,
-        type: null,
-        rating: null,
-        comment: "",
-        suggestion: "",
-      })
-      setShowFeedback(false)
-
-      // Refresh stats
-      await fetchFeedbackStats()
-
-      // Show success message
-      const successMsg: Message = {
-        id: `msg_${Date.now()}_success`,
-        content: "✅ Thank you for your feedback! It helps me improve.",
-        sender: "assistant",
-        timestamp: new Date().toISOString(),
-      }
-      setMessages((prev) => [...prev, successMsg])
+      setFeedbackOpen(null)
+      setFeedbackData({})
     } catch (error) {
       console.error("Failed to submit feedback:", error)
     }
   }
 
-  function startFeedback(messageId: string) {
-    setFeedback({ ...feedback, messageId })
-    setShowFeedback(true)
-  }
-
   return (
-    <div className="flex flex-col gap-6 h-screen">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Research Assistant</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Ask questions about your data and get AI-powered insights</p>
+    <div className="flex gap-6 h-screen">
+      {/* Sidebar - Conversation History */}
+      <div className="w-64 flex flex-col gap-4 border-r border-border">
+        <div className="p-4 border-b border-border">
+          <Button onClick={createNewConversation} className="w-full" size="sm">
+            <Plus className="size-4 mr-2" />
+            New Conversation
+          </Button>
         </div>
-        {feedbackStats && (
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm font-medium">{feedbackStats.total_feedback} feedback</p>
-              <p className="text-xs text-muted-foreground">⭐ {feedbackStats.average_rating?.toFixed(1)}/5</p>
-            </div>
+
+        <ScrollArea className="flex-1">
+          <div className="space-y-2 px-4">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                onClick={() => setCurrentConversation(conv)}
+                className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                  currentConversation?.id === conv.id
+                    ? "bg-primary/10 border border-primary/20"
+                    : "hover:bg-muted/50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{conv.title}</p>
+                    <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                      <Clock className="size-3" />
+                      {new Date(conv.updated_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteConversation(conv.id)
+                    }}
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        )}
+        </ScrollArea>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
-        {/* Chat Area */}
-        <div className="lg:col-span-3 flex flex-col gap-4">
-          <Card className="bg-card border-border flex-1 flex flex-col min-h-0">
-            <CardContent className="flex-1 overflow-hidden flex flex-col p-4">
-              <ScrollArea className="flex-1 pr-4">
-                <div className="space-y-4">
-                  {messages.length === 0 ? (
-                    <div className="flex items-center justify-center h-full text-center py-12">
-                      <div>
-                        <MessageSquare className="size-12 mx-auto mb-3 text-muted-foreground opacity-30" />
-                        <p className="text-sm text-muted-foreground">
-                          Start by asking a question about your data
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    messages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className={`flex gap-3 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
-                      >
-                        <div
-                          className={`max-w-md lg:max-w-lg px-4 py-3 rounded-lg ${
-                            msg.sender === "user"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-foreground border border-border"
-                          }`}
-                        >
-                          <div className="text-sm">
-                            {msg.sender === "assistant" ? (
-                              <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">
-                                {msg.content}
-                              </ReactMarkdown>
-                            ) : (
-                              msg.content
-                            )}
-                          </div>
-
-                          {/* Feedback Buttons for Assistant Messages */}
-                          {msg.sender === "assistant" && !msg.content.includes("✅") && (
-                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-current border-opacity-20">
-                              <button
-                                onClick={() => startFeedback(msg.id)}
-                                className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
-                              >
-                                <ThumbsUp className="size-3" />
-                                Helpful
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setFeedback({
-                                    messageId: msg.id,
-                                    type: "incorrect",
-                                    rating: null,
-                                    comment: "",
-                                    suggestion: "",
-                                  })
-                                  setShowFeedback(true)
-                                }}
-                                className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
-                              >
-                                <ThumbsDown className="size-3" />
-                                Improve
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  <div ref={scrollRef} />
-                </div>
-              </ScrollArea>
-
-              {/* Input Area */}
-              <div className="flex gap-2 mt-4 pt-4 border-t border-border">
-                <Input
-                  placeholder="Ask a question about your data..."
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSubmitQuery()}
-                  disabled={loading}
-                  className="flex-1"
-                />
-                <Button
-                  onClick={handleSubmitQuery}
-                  disabled={loading || !query.trim()}
-                  size="sm"
-                >
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">Research Assistant</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {currentConversation?.title || "Select a conversation"}
+            </p>
+          </div>
         </div>
 
-        {/* Sidebar */}
-        <div className="flex flex-col gap-4">
-          {/* Feedback Form */}
-          {showFeedback && (
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm">Share Feedback</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {/* Feedback Type */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-2 block">
-                    What's your feedback?
-                  </label>
-                  <div className="space-y-2">
-                    {(["helpful", "incorrect", "incomplete", "irrelevant"] as const).map((type) => (
-                      <button
-                        key={type}
-                        onClick={() => setFeedback({ ...feedback, type })}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                          feedback.type === type
+        <Card className="bg-card border-border flex-1 flex flex-col min-h-0">
+          <CardContent className="flex-1 overflow-hidden flex flex-col p-4">
+            <ScrollArea className="flex-1 pr-4">
+              <div className="space-y-4">
+                {messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-center py-12">
+                    <div>
+                      <MessageSquare className="size-12 mx-auto mb-3 text-muted-foreground opacity-30" />
+                      <p className="text-sm text-muted-foreground">
+                        Start a conversation by asking a question
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`flex gap-3 ${msg.sender === "user" ? "justify-end" : "justify-start"}`}
+                    >
+                      <div
+                        className={`max-w-2xl px-4 py-3 rounded-lg ${
+                          msg.sender === "user"
                             ? "bg-primary text-primary-foreground"
-                            : "bg-muted hover:bg-muted/80"
+                            : "bg-muted text-foreground border border-border"
                         }`}
                       >
-                        {type.charAt(0).toUpperCase() + type.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        <div className="text-sm">
+                          {msg.sender === "assistant" ? (
+                            <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">
+                              {msg.content}
+                            </ReactMarkdown>
+                          ) : (
+                            msg.content
+                          )}
+                        </div>
 
-                {/* Rating */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-2 block">
-                    Rate this response
-                  </label>
-                  <div className="flex gap-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        onClick={() => setFeedback({ ...feedback, rating: star })}
-                        className="transition-colors"
-                      >
-                        <Star
-                          className={`size-5 ${
-                            feedback.rating && feedback.rating >= star
-                              ? "fill-yellow-400 text-yellow-400"
-                              : "text-muted-foreground"
-                          }`}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        {/* Feedback Buttons */}
+                        {msg.sender === "assistant" && !msg.content.includes("error") && (
+                          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-current border-opacity-20">
+                            <button
+                              onClick={() => {
+                                setFeedbackOpen(msg.id)
+                                setFeedbackData({
+                                  ...feedbackData,
+                                  [msg.id]: { type: "helpful", rating: 5 },
+                                })
+                              }}
+                              className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                            >
+                              <ThumbsUp className="size-3" />
+                              Helpful
+                            </button>
+                            <button
+                              onClick={() => {
+                                setFeedbackOpen(msg.id)
+                                setFeedbackData({
+                                  ...feedbackData,
+                                  [msg.id]: { type: "incorrect", rating: 2 },
+                                })
+                              }}
+                              className="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                            >
+                              <ThumbsDown className="size-3" />
+                              Improve
+                            </button>
+                          </div>
+                        )}
 
-                {/* Comment */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Comment (optional)
-                  </label>
-                  <textarea
-                    value={feedback.comment}
-                    onChange={(e) => setFeedback({ ...feedback, comment: e.target.value })}
-                    placeholder="What could be improved?"
-                    className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm resize-none"
-                    rows={3}
-                  />
-                </div>
-
-                {/* Suggestion */}
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">
-                    Suggestion (optional)
-                  </label>
-                  <textarea
-                    value={feedback.suggestion}
-                    onChange={(e) => setFeedback({ ...feedback, suggestion: e.target.value })}
-                    placeholder="How should I improve?"
-                    className="w-full px-2 py-1.5 rounded-lg border border-border bg-background text-sm resize-none"
-                    rows={2}
-                  />
-                </div>
-
-                {/* Submit Button */}
-                <div className="flex gap-2">
-                  <Button
-                    onClick={handleSubmitFeedback}
-                    disabled={!feedback.type}
-                    size="sm"
-                    className="flex-1"
-                  >
-                    Submit
-                  </Button>
-                  <Button
-                    onClick={() => setShowFeedback(false)}
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Feedback Stats */}
-          {feedbackStats && (
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <BarChart3 className="size-4" />
-                  Feedback Stats
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">Average Rating</p>
-                  <p className="text-lg font-semibold">
-                    {feedbackStats.average_rating?.toFixed(1)}/5 ⭐
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">Feedback Breakdown</p>
-                  <div className="space-y-1">
-                    {Object.entries(feedbackStats.feedback_by_type || {}).map(([type, count]: any) => (
-                      <div key={type} className="flex items-center justify-between text-xs">
-                        <span className="capitalize text-muted-foreground">{type}</span>
-                        <span className="font-medium">{count}</span>
+                        {/* Feedback Form */}
+                        {feedbackOpen === msg.id && (
+                          <div className="mt-3 pt-3 border-t border-current border-opacity-20 space-y-2">
+                            <div className="flex gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  onClick={() =>
+                                    setFeedbackData({
+                                      ...feedbackData,
+                                      [msg.id]: { ...feedbackData[msg.id], rating: star },
+                                    })
+                                  }
+                                  className="transition-colors"
+                                >
+                                  <Star
+                                    className={`size-4 ${
+                                      feedbackData[msg.id]?.rating >= star
+                                        ? "fill-yellow-400 text-yellow-400"
+                                        : "text-muted-foreground"
+                                    }`}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                            <textarea
+                              value={feedbackData[msg.id]?.comment || ""}
+                              onChange={(e) =>
+                                setFeedbackData({
+                                  ...feedbackData,
+                                  [msg.id]: { ...feedbackData[msg.id], comment: e.target.value },
+                                })
+                              }
+                              placeholder="Your feedback..."
+                              className="w-full px-2 py-1 rounded text-xs bg-background/50 border border-current border-opacity-20 resize-none"
+                              rows={2}
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => submitFeedback(msg.id)}
+                                className="text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+                              >
+                                Submit
+                              </button>
+                              <button
+                                onClick={() => setFeedbackOpen(null)}
+                                className="text-xs px-2 py-1 rounded bg-muted hover:bg-muted/80"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  ))
+                )}
+                <div ref={scrollRef} />
+              </div>
+            </ScrollArea>
 
-                <div className="pt-2 border-t border-border">
-                  <p className="text-xs text-muted-foreground">
-                    Total: {feedbackStats.total_feedback} responses
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Tips */}
-          <Card className="bg-blue-500/5 border-blue-500/20">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <AlertCircle className="size-4 text-blue-500" />
-                Tips
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-xs text-muted-foreground space-y-2">
-              <p>• Be specific in your questions</p>
-              <p>• Provide feedback to help improve</p>
-              <p>• Use suggestions to guide improvements</p>
-            </CardContent>
-          </Card>
-        </div>
+            {/* Input Area */}
+            <div className="flex gap-2 mt-4 pt-4 border-t border-border">
+              <Input
+                placeholder="Ask a question..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleSubmitQuery()}
+                disabled={loading || !currentConversation}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleSubmitQuery}
+                disabled={loading || !query.trim() || !currentConversation}
+                size="sm"
+              >
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
