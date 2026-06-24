@@ -109,7 +109,10 @@ export function AdminHeader() {
 
         {/* Theme switcher */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Switch theme">
+          <DropdownMenuTrigger
+            className="flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors outline-none"
+            aria-label="Switch theme"
+          >
             {theme === "light"  && <Sun className="size-4" />}
             {theme === "dark"   && <Moon className="size-4" />}
             {theme === "system" && <Monitor className="size-4" />}
@@ -121,7 +124,7 @@ export function AdminHeader() {
             {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
               <DropdownMenuItem
                 key={value}
-                onSelect={() => setTheme(value)}
+                onClick={() => setTheme(value)}
                 className={cn(
                   "gap-2.5 text-sm cursor-pointer",
                   theme === value && "text-primary font-medium"
@@ -141,7 +144,9 @@ export function AdminHeader() {
 
         {/* User menu */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex items-center gap-2 h-8 px-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <DropdownMenuTrigger
+            className="flex items-center gap-2 h-8 px-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors outline-none"
+          >
             <div className="size-6 rounded-full bg-primary/15 border border-primary/25 flex items-center justify-center text-[11px] font-bold text-primary uppercase shrink-0">
               {username?.[0] ?? "A"}
             </div>
@@ -159,14 +164,14 @@ export function AdminHeader() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2 text-sm cursor-pointer"
-              onSelect={() => router.push("/admin/settings")}
+              onClick={() => router.push("/admin/settings")}
             >
               <Settings className="size-3.5" />
               Settings
             </DropdownMenuItem>
             <DropdownMenuItem
               className="gap-2 text-sm cursor-pointer"
-              onSelect={() => router.push("/admin/users")}
+              onClick={() => router.push("/admin/users")}
             >
               <User className="size-3.5" />
               Users
@@ -174,7 +179,7 @@ export function AdminHeader() {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="gap-2 text-sm cursor-pointer text-destructive focus:text-destructive"
-              onSelect={handleLogout}
+              onClick={handleLogout}
             >
               <LogOut className="size-3.5" />
               Sign out
