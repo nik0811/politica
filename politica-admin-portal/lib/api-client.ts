@@ -765,6 +765,29 @@ class APIClient {
   async getLearningInsights(): Promise<any[]> {
     return this.request("/api/assistant/insights")
   }
+
+  // ─── Feedback ────────────────────────────────────────────────────────────
+
+  async submitFeedback(feedback: {
+    message_id: string
+    rating?: number
+    feedback_type: string
+    comment?: string
+    suggested_improvement?: string
+  }): Promise<any> {
+    return this.request<any>("/api/research/feedback", {
+      method: "POST",
+      body: JSON.stringify(feedback),
+    })
+  }
+
+  async getFeedbackStats(): Promise<any> {
+    return this.request<any>("/api/research/feedback/stats")
+  }
+
+  async getImprovementSuggestions(): Promise<any> {
+    return this.request<any>("/api/research/feedback/improvements")
+  }
 }
 
 // Export singleton instance

@@ -12,6 +12,7 @@ from models.models import (
     Topic as TopicModel,
     ResearchConversation,
     ResearchMessage,
+    AssistantFeedback,
 )
 from typing import List, Optional
 from datetime import datetime
@@ -456,3 +457,115 @@ async def delete_conversation(conversation_id: str, db: Session = Depends(get_db
     db.delete(conversation)
     db.commit()
     return None
+
+
+# ── Feedback Endpoints ────────────────────────────────────────────────────────
+
+class FeedbackCreate(BaseModel):
+    message_id: str
+    rating: Optional[int] = None  # 1-5
+    feedback_type: str  # "helpful", "incorrect", "incomplete", "irrelevant"
+    comment: Optional[str] = None
+    suggested_improvement: Optional[str] = None
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    conversation_id: str
+    rating: Optional[int]
+    feedback_type: str
+    comment: Optional[str]
+    suggested_improvement: Optional[str]
+    created_at: datetime
+
+
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(
+    request: FeedbackCreate,
+    db: Session = Depends(get_db)
+):
+    """Submit feedback on an assistant response to improve future answers."""
+    # Verify message exists
+    message = db.query(ResearchMessage).filter(ResearchMessage.id == request.message_id).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Create feedback record
+    feedback = AssistantFeedback(
+        message_id=request.message_id,
+        conversation_id=message.conversation_id,
+        rating=request.rating,
+        feedback_type=request.feedback_type,
+        comment=request.comment,
+        suggested_improvement=request.suggested_improvement,
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    
+    logger.info(f"Feedback submitted for message {request.message_id}: {request.feedback_type}")
+    
+    return feedback
+
+
+@router.get("/feedback/stats")
+async def get_feedback_stats(db: Session = Depends(get_db)):
+    """Get feedback statistics to understand assistant performance."""
+    from models.models import AssistantFeedback
+    
+    total_feedback = db.query(func.count(AssistantFeedback.id)).scalar() or 0
+    
+    # Feedback by type
+    feedback_by_type = db.query(
+        AssistantFeedback.feedback_type,
+        func.count(AssistantFeedback.id).label("count")
+    ).group_by(AssistantFeedback.feedback_type).all()
+    
+    # Average rating
+    avg_rating = db.query(func.avg(AssistantFeedback.rating)).scalar() or 0
+    
+    # Recent feedback
+    recent_feedback = db.query(AssistantFeedback).order_by(
+        AssistantFeedback.created_at.desc()
+    ).limit(10).all()
+    
+    return {
+        "total_feedback": total_feedback,
+        "average_rating": float(avg_rating),
+        "feedback_by_type": {item[0]: item[1] for item in feedback_by_type},
+        "recent_feedback": [
+            {
+                "id": f.id,
+                "type": f.feedback_type,
+                "rating": f.rating,
+                "comment": f.comment,
+                "created_at": f.created_at
+            }
+            for f in recent_feedback
+        ]
+    }
+
+
+@router.get("/feedback/improvements")
+async def get_improvement_suggestions(db: Session = Depends(get_db)):
+    """Get suggested improvements from user feedback."""
+    from models.models import AssistantFeedback
+    
+    suggestions = db.query(AssistantFeedback).filter(
+        AssistantFeedback.suggested_improvement.isnot(None)
+    ).order_by(AssistantFeedback.created_at.desc()).limit(20).all()
+    
+    return {
+        "total_suggestions": len(suggestions),
+        "suggestions": [
+            {
+                "id": s.id,
+                "feedback_type": s.feedback_type,
+                "suggestion": s.suggested_improvement,
+                "original_comment": s.comment,
+                "created_at": s.created_at
+            }
+            for s in suggestions
+        ]
+    }
