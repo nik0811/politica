@@ -176,6 +176,15 @@ export default function ResearchPage() {
         suggested_improvement: feedbackData[messageId]?.suggestion,
       })
 
+      // Add success message
+      const successMessage: Message = {
+        id: `msg_${Date.now()}_success`,
+        content: "✅ Thank you for your feedback! It helps me improve.",
+        sender: "assistant",
+        timestamp: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, successMessage])
+
       setFeedbackOpen(null)
       setFeedbackData({})
     } catch (error) {
@@ -186,16 +195,16 @@ export default function ResearchPage() {
   return (
     <div className="flex gap-6 h-screen">
       {/* Sidebar - Conversation History */}
-      <div className="w-64 flex flex-col gap-4 border-r border-border">
-        <div className="p-4 border-b border-border">
+      <div className="w-64 flex flex-col gap-4 border-r border-border overflow-hidden">
+        <div className="p-4 border-b border-border shrink-0">
           <Button onClick={createNewConversation} className="w-full" size="sm">
             <Plus className="size-4 mr-2" />
             New Conversation
           </Button>
         </div>
 
-        <ScrollArea className="flex-1">
-          <div className="space-y-2 px-4">
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="space-y-2 px-4 pb-4">
             {conversations.map((conv) => (
               <div
                 key={conv.id}
@@ -219,7 +228,7 @@ export default function ResearchPage() {
                       e.stopPropagation()
                       deleteConversation(conv.id)
                     }}
-                    className="text-muted-foreground hover:text-destructive transition-colors"
+                    className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
                   >
                     <Trash2 className="size-4" />
                   </button>
@@ -241,9 +250,9 @@ export default function ResearchPage() {
           </div>
         </div>
 
-        <Card className="bg-card border-border flex-1 flex flex-col min-h-0">
+        <Card className="bg-card border-border flex-1 flex flex-col min-h-0 overflow-hidden">
           <CardContent className="flex-1 overflow-hidden flex flex-col p-4">
-            <ScrollArea className="flex-1 pr-4">
+            <ScrollArea className="flex-1 min-h-0 pr-4">
               <div className="space-y-4">
                 {messages.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-center py-12">
@@ -299,7 +308,7 @@ export default function ResearchPage() {
                         </div>
 
                         {/* Feedback Buttons */}
-                        {msg.sender === "assistant" && !msg.content.includes("error") && (
+                        {msg.sender === "assistant" && !msg.content.includes("error") && !msg.content.includes("✅") && (
                           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-current border-opacity-20">
                             <button
                               onClick={() => {
@@ -392,7 +401,7 @@ export default function ResearchPage() {
             </ScrollArea>
 
             {/* Input Area */}
-            <div className="flex gap-2 mt-4 pt-4 border-t border-border">
+            <div className="flex gap-2 mt-4 pt-4 border-t border-border shrink-0">
               <Input
                 placeholder="Ask a question..."
                 value={query}
