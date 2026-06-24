@@ -269,7 +269,28 @@ export default function ResearchPage() {
                       >
                         <div className="text-sm">
                           {msg.sender === "assistant" ? (
-                            <ReactMarkdown className="prose prose-sm dark:prose-invert max-w-none">
+                            <ReactMarkdown
+                              components={{
+                                p: ({ node, ...props }) => <p className="mb-2" {...props} />,
+                                ul: ({ node, ...props }) => <ul className="list-disc list-inside mb-2" {...props} />,
+                                ol: ({ node, ...props }) => <ol className="list-decimal list-inside mb-2" {...props} />,
+                                li: ({ node, ...props }) => <li className="mb-1" {...props} />,
+                                code: ({ node, inline, ...props }) =>
+                                  inline ? (
+                                    <code className="bg-muted px-1.5 py-0.5 rounded text-xs" {...props} />
+                                  ) : (
+                                    <code className="block bg-muted p-2 rounded text-xs overflow-x-auto mb-2" {...props} />
+                                  ),
+                                pre: ({ node, ...props }) => <pre className="mb-2" {...props} />,
+                                blockquote: ({ node, ...props }) => (
+                                  <blockquote className="border-l-2 border-muted-foreground pl-2 italic mb-2" {...props} />
+                                ),
+                                a: ({ node, ...props }) => <a className="text-primary hover:underline" {...props} />,
+                                h1: ({ node, ...props }) => <h1 className="text-lg font-bold mb-2" {...props} />,
+                                h2: ({ node, ...props }) => <h2 className="text-base font-bold mb-2" {...props} />,
+                                h3: ({ node, ...props }) => <h3 className="text-sm font-bold mb-2" {...props} />,
+                              }}
+                            >
                               {msg.content}
                             </ReactMarkdown>
                           ) : (
