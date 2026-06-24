@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import { useTheme } from "@/lib/theme-context"
@@ -13,7 +14,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Bell,
   LogOut,
   User,
   Settings,
@@ -21,6 +21,8 @@ import {
   Sun,
   Moon,
   Monitor,
+  Wifi,
+  WifiOff,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -53,6 +55,22 @@ export function AdminHeader() {
   const { theme, setTheme } = useTheme()
   const router = useRouter()
   const title = PAGE_TITLES[pathname] ?? "Admin"
+  const [isOnline, setIsOnline] = useState(true)
+
+  useEffect(() => {
+    setIsOnline(navigator.onLine)
+
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -69,10 +87,24 @@ export function AdminHeader() {
       </div>
 
       <div className="flex items-center gap-1.5 ml-auto">
-        {/* Live badge */}
-        <div className="hidden md:flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground bg-muted/60 border border-border/60 px-2.5 py-1 rounded-full select-none">
-          <span className="size-1.5 rounded-full bg-[var(--success)] animate-pulse" />
-          Live
+        {/* Internet status */}
+        <div className={cn(
+          "hidden md:flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full select-none border",
+          isOnline 
+            ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" 
+            : "text-red-500 bg-red-500/10 border-red-500/20"
+        )}>
+          {isOnline ? (
+            <>
+              <Wifi className="size-3" />
+              Online
+            </>
+          ) : (
+            <>
+              <WifiOff className="size-3" />
+              Offline
+            </>
+          )}
         </div>
 
         {/* Theme switcher */}
@@ -104,15 +136,6 @@ export function AdminHeader() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {/* Notifications */}
-        <button
-          className="relative flex items-center justify-center size-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Notifications"
-        >
-          <Bell className="size-4" />
-          <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-primary" />
-        </button>
 
         <Separator orientation="vertical" className="h-5 mx-0.5" />
 
