@@ -428,11 +428,11 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
   console.log('[Service Worker] Opening tweet in new tab:', tweetUrl)
   
   return new Promise((resolve, reject) => {
-    // Generate a unique request ID
-    const requestId = `tweet_${Date.now()}_${Math.random()}`
+    // Use the tweet's status ID as requestId so it matches what the content script sends
+    const requestId = tweetUrl.match(/status\/(\d+)/)?.[1] || `tweet_${Date.now()}`
     
-    // Open the tweet URL in a new tab
-    chrome.tabs.create({ url: tweetUrl, active: false }, (newTab) => {
+    // Open the tweet URL in a new tab (must be active so Twitter renders replies)
+    chrome.tabs.create({ url: tweetUrl, active: true }, (newTab) => {
       if (chrome.runtime.lastError) {
         return reject(new Error(chrome.runtime.lastError.message))
       }
@@ -446,11 +446,13 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
         if (sender.tab?.id === newTabId && message.type === 'TWEET_REPLIES_READY' && message.requestId === requestId) {
           console.log('[Service Worker] Received replies from new tab:', message.replies?.length || 0)
           clearTimeout(timeoutId)
+          chrome.runtime.onMessage.removeListener(messageListener)
           
-          // Close the new tab
+          // Close the new tab and switch back to source tab
           chrome.tabs.remove(newTabId, () => {
             console.log('[Service Worker] Closed new tab:', newTabId)
           })
+          if (sourceTabId) chrome.tabs.update(sourceTabId, { active: true })
           
           resolve({ replies: message.replies || [] })
         }
@@ -465,6 +467,7 @@ async function handleExtractTweetReplies(tweetUrl, sourceTabId) {
         chrome.tabs.remove(newTabId, () => {
           console.log('[Service Worker] Closed tab after timeout:', newTabId)
         })
+        if (sourceTabId) chrome.tabs.update(sourceTabId, { active: true })
         resolve({ replies: [] })
       }, 12000)
     })

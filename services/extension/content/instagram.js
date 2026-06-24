@@ -815,9 +815,8 @@
     try {
       var noNewPostsStreak = 0
       var maxNoNewStreak = 5
-      var reachedDateBoundary = false
       
-      while (!scraperState.shouldStop && !reachedDateBoundary && scraperState.postsCollected < maxPosts) {
+      while (!scraperState.shouldStop && scraperState.postsCollected < maxPosts) {
         // Collect actual DOM element references for grid thumbnails
         var postElements = getVisiblePostElements()
         var newElements = postElements.filter(function (el) {
@@ -880,10 +879,9 @@
               
               if (postDate) {
                 if (fromDate && postDate < fromDate) {
-                  // Post is older than fromDate - stop all scraping immediately
-                  window.PoliticaCollector.showNotification('Reached posts older than date range, stopping...', 'info')
+                  // Post is older than fromDate, stop scraping
+                  window.PoliticaCollector.showNotification('Reached posts older than date range', 'info')
                   await closePostModal()
-                  reachedDateBoundary = true
                   break
                 }
                 if (toDate && postDate > toDate) {

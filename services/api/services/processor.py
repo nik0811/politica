@@ -24,11 +24,16 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are a political intelligence analyst specializing in Indian politics,
 particularly Goa state politics. Analyze the given social media post and extract structured information.
 
-You have access to relevant context documents from the knowledge base. Use them to:
-1. Ground your analysis in actual collected data
-2. Identify patterns and connections to existing topics/entities
-3. Validate sentiment assessment against similar posts
-4. Ensure promises are consistent with historical patterns
+You have access to:
+1. The full post content with ALL its comments/replies and engagement metrics (likes, shares, views)
+2. Relevant context documents from the knowledge base (cross-platform: Instagram, Facebook, Twitter)
+
+Use ALL available data to:
+1. Ground your analysis in actual collected data — consider engagement signals (high views/shares = more impact)
+2. Factor in public reaction from comments when assessing sentiment
+3. Identify patterns and connections to existing topics/entities across platforms
+4. Validate promises against historical patterns
+5. Weight sentiment: a post with many negative comments should lean negative even if the post text is neutral
 
 Return ONLY valid JSON (no markdown fences, no explanation) with this exact structure:
 {
@@ -51,7 +56,7 @@ Return ONLY valid JSON (no markdown fences, no explanation) with this exact stru
 }
 
 Rules:
-- sentiment: assess overall political tone; score from -1.0 (very negative/criticism/failure) to 1.0 (very positive/progress/achievement), 0.0 is neutral
+- sentiment: assess overall political tone including public reaction from comments; score from -1.0 (very negative/criticism/failure) to 1.0 (very positive/progress/achievement), 0.0 is neutral
 - topics: use concise lowercase English labels relevant to Indian politics
 - entities: only extract clearly named entities; include politicians, parties (BJP, Congress, AAP, etc.), places in Goa
 - promises: only include explicit commitments ("will build", "promise to", "committed to", "we will", "shall provide")
@@ -70,14 +75,25 @@ def _build_prompt(doc: Document, db: Session, context_docs: list = None) -> str:
         parts.append(f"Handle: {doc.author_handle}")
     parts.append(f"\nContent:\n{doc.content[:3000]}")
 
-    # Include top comments if available (up to 5)
+    # Include engagement metrics
+    engagement = []
+    if doc.likes_count:   engagement.append(f"likes={doc.likes_count}")
+    if doc.shares_count:  engagement.append(f"shares/retweets={doc.shares_count}")
+    if doc.views_count:   engagement.append(f"views={doc.views_count}")
+    if doc.comments_count: engagement.append(f"comments={doc.comments_count}")
+    if doc.reactions_count: engagement.append(f"reactions={doc.reactions_count}")
+    if engagement:
+        parts.append(f"\nEngagement: {', '.join(engagement)}")
+
+    # Include ALL comments/replies (up to 20, sorted by likes)
     if doc.comments:
-        top_comments = sorted(doc.comments, key=lambda c: c.likes_count or 0, reverse=True)[:5]
+        top_comments = sorted(doc.comments, key=lambda c: c.likes_count or 0, reverse=True)[:20]
         if top_comments:
-            parts.append("\nTop comments:")
+            parts.append(f"\nComments/Replies ({len(doc.comments)} total, showing top {len(top_comments)}):")
             for c in top_comments:
                 author_label = c.author_handle or c.author or "unknown"
-                parts.append(f"  @{author_label}: {c.content[:200]}")
+                sentiment_label = f" [sentiment: {c.sentiment:.2f}]" if c.sentiment is not None else ""
+                parts.append(f"  @{author_label}: {c.content[:300]}{sentiment_label}")
 
     # Add RAG context from similar documents
     if context_docs is None:
@@ -271,11 +287,11 @@ async def process_batch(document_ids: list[str], concurrency: int = 3) -> dict:
     return {"processed": processed, "failed": failed, "total": len(document_ids)}
 
 
-def get_pending_document_ids(db: Session, limit: int = 50) -> list[str]:
-    """Return IDs of documents with status='pending'."""
+def get_pending_document_ids(db: Session, limit: int = 100) -> list[str]:
+    """Return IDs of documents with status='pending' or 'failed' (retry failed ones)."""
     docs = (
         db.query(Document.id)
-        .filter(Document.status == "pending")
+        .filter(Document.status.in_(["pending", "failed"]))
         .limit(limit)
         .all()
     )

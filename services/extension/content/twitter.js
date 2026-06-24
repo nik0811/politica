@@ -128,37 +128,31 @@
         
         console.log(`[Twitter Scraper] Found ${allArticles.length} articles on tweet page`)
         
-        // Skip the first one (main tweet), extract the rest (replies)
+        // Skip article[0] (main tweet), extract all after it as replies
         for (let i = 1; i < allArticles.length; i++) {
           const replyEl = allArticles[i]
           const textEl = replyEl.querySelector('[data-testid="tweetText"]')
           const text = textEl?.textContent?.trim()
-          if (!text) {
-            console.log(`[Twitter Scraper] Skipping article ${i} - no text found`)
-            continue
-          }
-          
-          const authorEl = replyEl.querySelector('[data-testid="User-Name"]')
-          const author = authorEl?.textContent?.trim() || 'unknown'
-          
+          if (!text) continue
+
+          // Extract display name and handle separately
+          const userNameEl = replyEl.querySelector('[data-testid="User-Name"]')
+          const displayNameEl = userNameEl?.querySelector('span:first-child span')
+          const handleEl = userNameEl?.querySelector('a[href^="/"]')
+          const displayName = displayNameEl?.textContent?.trim() || ''
+          const handle = handleEl?.getAttribute('href')?.replace('/', '') || ''
+          const author = displayName || handle || 'unknown'
+
           const likeBtn = replyEl.querySelector('[data-testid="like"]')
-          const likeText = likeBtn?.textContent?.trim() || '0'
-          const likes = window.PoliticaCollector?.parseCount?.(likeText) || 0
-          
+          const likes = window.PoliticaCollector?.parseCount?.(likeBtn?.textContent?.trim() || '0') || 0
+
           const retweetBtn = replyEl.querySelector('[data-testid="retweet"]')
-          const retweetText = retweetBtn?.textContent?.trim() || '0'
-          const retweets = window.PoliticaCollector?.parseCount?.(retweetText) || 0
-          
-          console.log(`[Twitter Scraper] ✓ Reply from ${author}`)
-          console.log(`[Twitter Scraper]   Text: ${text.slice(0, 100)}${text.length > 100 ? '...' : ''}`)
-          console.log(`[Twitter Scraper]   ❤️ ${likes} likes | 🔄 ${retweets} retweets`)
-          
-          replies.push({
-            author,
-            text,
-            likes,
-            retweets
-          })
+          const retweets = window.PoliticaCollector?.parseCount?.(retweetBtn?.textContent?.trim() || '0') || 0
+
+          console.log(`[Twitter Scraper] ✓ Reply from @${handle} (${displayName}): ${text.slice(0, 80)}`)
+          console.log(`[Twitter Scraper]   ❤️ ${likes} | 🔄 ${retweets}`)
+
+          replies.push({ author: displayName, author_handle: handle, text, likes, retweets })
         }
         
         console.log(`[Twitter Scraper] ═══════════════════════════════════════`)
@@ -320,6 +314,8 @@
       language: 'en',
       likes_count: counts.likes_count,
       comments_count: counts.reply_count,
+      shares_count: counts.retweet_count,
+      views_count: counts.view_count,
       metadata: {
         retweet_count: counts.retweet_count,
         view_count: counts.view_count
@@ -345,7 +341,7 @@
 
     window.PoliticaCollector.showNotification('Starting profile scrape...', 'info')
 
-    while (total < maxPosts && noNewStreak < 5 && scraperState.isRunning) {
+    while (total < maxPosts && noNewStreak < 10 && scraperState.isRunning) {
       console.log(`[Twitter Scraper] Loop iteration - total: ${total}, saved: ${saved}`)
       
       // Click any "Show more" / expansion buttons (but NOT "Discover more")
@@ -378,8 +374,6 @@
           const tweetUrl = tweetLink?.href
           
           if (tweetUrl) {
-            console.log(`[Twitter Scraper] Extracting replies for: ${tweetUrl}`)
-            
             // Extract tweet data from profile page (basic info)
             const tweetData = extractTweetData(tweet, url)
             
@@ -387,33 +381,45 @@
             const replyBtn = tweet.querySelector('[data-testid="reply"]')
             const replyText = replyBtn?.textContent?.trim() || '0'
             const replyCount = window.PoliticaCollector.parseCount(replyText)
-            
             tweetData.comments_count = replyCount
-            
-            // Use service worker to open tweet in new tab and extract replies
+
+            // Only open a new tab if the tweet actually has replies
             let replies = []
-            try {
-              const result = await new Promise((resolve, reject) => {
-                chrome.runtime.sendMessage(
-                  { type: 'EXTRACT_TWEET_REPLIES', tweetUrl },
-                  (response) => {
-                    if (chrome.runtime.lastError) {
-                      reject(new Error(chrome.runtime.lastError.message))
-                    } else if (response?.error) {
-                      reject(new Error(response.error))
-                    } else {
-                      resolve(response)
+            if (replyCount > 0) {
+              console.log(`[Twitter Scraper] ${replyCount} repl${replyCount === 1 ? 'y' : 'ies'} — opening: ${tweetUrl}`)
+              try {
+                const result = await new Promise((resolve, reject) => {
+                  chrome.runtime.sendMessage(
+                    { type: 'EXTRACT_TWEET_REPLIES', tweetUrl },
+                    (response) => {
+                      if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message))
+                      } else if (response?.error) {
+                        reject(new Error(response.error))
+                      } else {
+                        resolve(response)
+                      }
                     }
-                  }
-                )
-              })
-              replies = result.replies || []
-              console.log(`[Twitter Scraper] Got ${replies.length} replies`)
-            } catch (err) {
-              console.log('[Twitter Scraper] Could not extract replies:', err)
+                  )
+                })
+                replies = result.replies || []
+                console.log(`[Twitter Scraper] Got ${replies.length} replies`)
+              } catch (err) {
+                console.log('[Twitter Scraper] Could not extract replies:', err)
+              }
+            } else {
+              console.log(`[Twitter Scraper] 0 replies — saving without opening tab`)
             }
             
-            tweetData.metadata = { replies }
+            // Map replies to the `comments` field the API expects
+            tweetData.comments = replies.map(r => ({
+              author: r.author || 'unknown',
+              author_handle: r.author_handle || '',
+              content: r.text || '',
+              likes_count: r.likes || 0,
+              replies_count: r.retweets || 0
+            }))
+            tweetData.metadata = { retweet_count: tweetData.metadata?.retweet_count, view_count: tweetData.metadata?.view_count }
             
             // Send to API
             await sendToTwitterApi(tweetData)
@@ -453,9 +459,18 @@
 
       noNewStreak = newFound === 0 ? noNewStreak + 1 : 0
 
-      // Scroll to load more tweets
+      // Scroll aggressively to trigger Twitter's lazy loading
       window.scrollTo(0, document.body.scrollHeight)
-      await new Promise(r => setTimeout(r, 2500))
+      await new Promise(r => setTimeout(r, 1500))
+      window.scrollTo(0, document.body.scrollHeight)
+      await new Promise(r => setTimeout(r, 1500))
+      // If no new tweets found, scroll back up slightly then down again to nudge Twitter
+      if (newFound === 0) {
+        window.scrollTo(0, document.body.scrollHeight - 500)
+        await new Promise(r => setTimeout(r, 500))
+        window.scrollTo(0, document.body.scrollHeight)
+        await new Promise(r => setTimeout(r, 1500))
+      }
     }
 
     console.log(`[Twitter Scraper] Scraping complete - saved: ${saved}`)

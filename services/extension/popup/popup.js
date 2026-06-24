@@ -110,7 +110,7 @@ function renderPlatform(platform, url) {
   autoCollectToggle.addEventListener('click', toggleAutoCollect)
 
   // Show deep scrape panel for all platforms (Instagram profiles, Facebook feeds, Twitter timelines)
-  if ((platform === 'instagram' && !isPostPage(url, platform)) || 
+  if (platform === 'instagram' || 
       platform === 'facebook' || 
       (platform === 'twitter' && !isPostPage(url, platform))) {
     deepScrapePanel.style.display = 'block'
@@ -256,8 +256,6 @@ async function toggleDeepScrape() {
     stopDeepScrapePoll()
   } else {
     const maxPosts = parseInt(deepScrapeMaxPosts.value, 10) || 50
-    const fromDate = document.getElementById('deep-scrape-from-date').value
-    const toDate = document.getElementById('deep-scrape-to-date').value
     
     // Immediately update UI to show running state before we hear back from content script
     deepScrapeRunning = true
@@ -265,7 +263,7 @@ async function toggleDeepScrape() {
     startDeepScrapePoll()
     chrome.tabs.sendMessage(tab.id, { 
       type: 'DEEP_SCRAPE_PROFILE', 
-      options: { maxPosts, fromDate, toDate } 
+      options: { maxPosts } 
     }, (res) => {
       // This callback fires when the ENTIRE scrape completes (could be minutes later)
       if (chrome.runtime.lastError || (res && res.error)) {
@@ -285,15 +283,11 @@ function updateDeepScrapeToggleUI(running) {
     deepScrapeLabel.textContent = 'Stop'
     deepScrapeToggle.querySelector('svg').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
     deepScrapeMaxPosts.disabled = true
-    document.getElementById('deep-scrape-from-date').disabled = true
-    document.getElementById('deep-scrape-to-date').disabled = true
   } else {
     deepScrapeToggle.classList.remove('active')
     deepScrapeLabel.textContent = 'Start'
     deepScrapeToggle.querySelector('svg').innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>'
     deepScrapeMaxPosts.disabled = false
-    document.getElementById('deep-scrape-from-date').disabled = false
-    document.getElementById('deep-scrape-to-date').disabled = false
   }
 }
 
@@ -323,28 +317,11 @@ function updateDeepScrapeUI(status) {
   if (!status) return
 
   const maxPosts = parseInt(deepScrapeMaxPosts.value, 10) || 50
-  const fromDate = document.getElementById('deep-scrape-from-date').value
-  const toDate = document.getElementById('deep-scrape-to-date').value
-  const dsDateRangeRow = document.getElementById('ds-date-range-row')
-  const dsCurrentDateRow = document.getElementById('ds-current-date-row')
 
   if (status.isRunning) {
     dsState.textContent = 'Scraping...'
     dsState.className = 'progress-value state-collecting'
     dsCurrentRow.style.display = 'flex'
-    
-    // Show date range if specified
-    if (fromDate || toDate) {
-      dsDateRangeRow.style.display = 'flex'
-      const rangeText = (fromDate || '—') + ' to ' + (toDate || '—')
-      document.getElementById('ds-date-range').textContent = rangeText
-    }
-    
-    // Show current post date if available
-    if (status.currentPostDate) {
-      dsCurrentDateRow.style.display = 'flex'
-      document.getElementById('ds-current-date').textContent = status.currentPostDate
-    }
     
     if (status.currentPostUrl) {
       const shortUrl = status.currentPostUrl.replace('https://www.instagram.com', '')

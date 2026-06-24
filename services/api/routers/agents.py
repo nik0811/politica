@@ -303,8 +303,10 @@ async def _process_all_pending(job_id: str):
         
         processed = 0
         
-        # Process pending documents
-        pending_docs = db.query(DocumentModel).filter(DocumentModel.status == "pending").all()
+        # Process pending + failed documents (retry failed)
+        pending_docs = db.query(DocumentModel).filter(
+            DocumentModel.status.in_(["pending", "failed"])
+        ).all()
         for doc in pending_docs:
             try:
                 # Process document (this does sentiment, entities, topics, promises in one LLM call)

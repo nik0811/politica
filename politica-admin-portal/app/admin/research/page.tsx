@@ -139,6 +139,8 @@ export default function ResearchPage() {
       }
     }
 
+    if (!convId) return
+
     const userMessage: Message = {
       id: `temp_${Date.now()}`,
       content: query,

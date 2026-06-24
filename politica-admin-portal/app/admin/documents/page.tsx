@@ -359,7 +359,7 @@ export default function DocumentsPage() {
           ))}
         </div>
         <div className="flex items-center gap-1.5">
-          {["all", "x", "instagram", "telegram", "news"].map((p) => (
+          {["all", "twitter", "facebook", "instagram"].map((p) => (
             <Button key={p} size="sm" variant={filterPlatform === p ? "default" : "outline"} className="h-8 text-xs capitalize" onClick={() => setFilterPlatform(p)}>
               {p}
             </Button>
@@ -463,13 +463,19 @@ export default function DocumentsPage() {
                               {doc.comments_count!.toLocaleString()}
                             </span>
                           )}
+                          {(doc.shares_count ?? 0) > 0 && (
+                            <span className="flex items-center gap-0.5">
+                              <Share2 className="size-3" />
+                              {doc.shares_count!.toLocaleString()}
+                            </span>
+                          )}
                           {(doc.views_count ?? 0) > 0 && (
                             <span className="flex items-center gap-0.5">
                               <Eye className="size-3" />
                               {doc.views_count!.toLocaleString()}
                             </span>
                           )}
-                          {!(doc.likes_count ?? 0) && !(doc.comments_count ?? 0) && !(doc.views_count ?? 0) && (
+                          {!(doc.likes_count ?? 0) && !(doc.comments_count ?? 0) && !(doc.shares_count ?? 0) && !(doc.views_count ?? 0) && (
                             <span>—</span>
                           )}
                         </div>
