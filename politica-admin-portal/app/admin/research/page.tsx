@@ -125,10 +125,17 @@ export default function ResearchPage() {
 
     try {
       // Add user message
-      await apiClient.addMessage(currentConversation.id, {
+      const userMsgResponse = await apiClient.addMessage(currentConversation.id, {
         content: query,
         sender: "user",
       })
+
+      // Update user message with actual ID
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === userMessage.id ? { ...msg, id: userMsgResponse.id } : msg
+        )
+      )
 
       // Get assistant response
       const response = await apiClient.searchResearch({
@@ -145,13 +152,18 @@ export default function ResearchPage() {
       }
 
       // Add assistant message
-      await apiClient.addMessage(currentConversation.id, {
+      const assistantMsgResponse = await apiClient.addMessage(currentConversation.id, {
         content: response.answer,
         sender: "assistant",
         sources: response.sources,
       })
 
-      setMessages((prev) => [...prev, assistantMessage])
+      // Update assistant message with actual ID
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantMessage.id ? { ...msg, id: assistantMsgResponse.id } : msg
+        )
+      )
     } catch (error) {
       console.error("Failed to get response:", error)
       const errorMessage: Message = {
